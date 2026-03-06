@@ -15,6 +15,7 @@ public:
 
     PluginScanner();
 
+    void setLogCallback(std::function<void(const juce::String&)> callback);
     juce::Array<PluginInfo> scanPlugins(const juce::String& folderPath);
     const juce::Array<PluginInfo>& getCachedPlugins() const noexcept;
     std::optional<PluginInfo> findPlugin(const juce::String& pluginId) const;
@@ -24,6 +25,9 @@ public:
                                                                     juce::String& errorMessage);
 
 private:
+    juce::File getCacheFile() const;
+    void loadCacheFromDisk();
+    void saveCacheToDisk() const;
     juce::Array<juce::File> getDefaultSearchRoots() const;
     void scanRoot(const juce::File& root,
                   juce::Array<PluginInfo>& discovered,
@@ -31,9 +35,11 @@ private:
     bool isPluginCandidate(const juce::File& file) const;
     juce::Array<juce::PluginDescription> describePluginFile(const juce::File& file) const;
     static juce::String deriveCategory(const juce::String& rawCategory, const juce::String& name);
+    void log(const juce::String& line) const;
 
     juce::AudioPluginFormatManager formatManager;
     juce::KnownPluginList knownPlugins;
     juce::Array<PluginInfo> cachedPlugins;
+    std::function<void(const juce::String&)> logCallback;
 };
 } // namespace batchmaster

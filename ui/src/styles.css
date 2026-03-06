@@ -129,7 +129,8 @@ code {
   grid-template-columns: 1.1fr 1.2fr;
   grid-template-areas:
     "library chain"
-    "saved queue";
+    "saved queue"
+    "console console";
 }
 
 .panel {
@@ -155,6 +156,10 @@ code {
 
 .panel-queue {
   grid-area: queue;
+}
+
+.panel-console {
+  grid-area: console;
 }
 
 .panel-heading {
@@ -327,6 +332,26 @@ code {
   text-transform: capitalize;
 }
 
+.console-viewport {
+  min-height: 260px;
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid rgba(26, 20, 15, 0.09);
+  border-radius: 22px;
+  padding: 1rem;
+  background: #18120d;
+}
+
+.console-log {
+  margin: 0;
+  color: #f3d8bf;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .error-text {
   color: var(--danger);
 }
@@ -350,7 +375,8 @@ code {
       "library"
       "chain"
       "saved"
-      "queue";
+      "queue"
+      "console";
   }
 }
 

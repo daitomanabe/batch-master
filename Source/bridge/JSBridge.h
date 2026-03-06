@@ -27,6 +27,8 @@ private:
     static juce::var pluginArrayToVar(const juce::Array<PluginInfo>& plugins);
     static juce::var savedChainsToVar(const juce::Array<SavedChain>& chains);
 
+    void appendScanLog(const juce::String& line);
+    void clearScanLogs();
     void emitProgressEvent(const BatchJob& job, bool done);
     void emitBatchDoneEvent(int totalFiles, double elapsedSeconds);
 
@@ -37,5 +39,7 @@ private:
     BatchProcessor batchProcessor;
     juce::WebBrowserComponent* browser = nullptr;
     juce::String currentChainJson;
+    juce::CriticalSection scanLogLock;
+    juce::StringArray scanLogs;
 };
 } // namespace batchmaster

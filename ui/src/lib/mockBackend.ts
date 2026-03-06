@@ -46,6 +46,8 @@ const mockPresets = new Map<string, string[]>([
 let currentChainJson = "[]";
 let eventToken = 0;
 let timerId: number | null = null;
+const scanLogs: string[] = [];
+let cachedPlugins: Plugin[] = [...mockPlugins];
 
 const listeners = new Map<number, { eventId: BackendEvent["type"]; callback: (payload: BackendEvent) => void }>();
 const savedChains: SavedChain[] = [];
@@ -66,6 +68,20 @@ function emit(payload: BackendEvent) {
     if (listener.eventId === payload.type) {
       listener.callback(payload);
     }
+  });
+}
+
+function logScan(line: string) {
+  const timestampedLine = `[${new Date().toLocaleTimeString("ja-JP", { hour12: false })}] ${line}`;
+  scanLogs.push(timestampedLine);
+
+  if (scanLogs.length > 500) {
+    scanLogs.splice(0, scanLogs.length - 500);
+  }
+
+  emit({
+    type: "scan.log",
+    line: timestampedLine,
   });
 }
 
@@ -147,10 +163,30 @@ function ensureTimer() {
 export const mockBackend: BackendBridge = {
   isNative: false,
   async scanPlugins() {
-    return [...mockPlugins];
+    logScan("[scan] Starting VST3 scan.");
+    logScan("[scan] Fixed root: /Library/Audio/Plug-Ins/VST3");
+
+    for (const plugin of mockPlugins) {
+      logScan(`[scan] Inspecting ${plugin.path}`);
+      await new Promise((resolve) => window.setTimeout(resolve, 120));
+      logScan(`[scan] Added plugin: ${plugin.name} (${plugin.vendor})`);
+    }
+
+    cachedPlugins = [...mockPlugins];
+    logScan(`[cache] Saved plugin cache to ~/Library/Application Support/BatchMaster/plugin-cache.json`);
+    logScan(`[scan] Completed. ${cachedPlugins.length} plugins cached.`);
+    return [...cachedPlugins];
   },
   async getPluginList() {
-    return [...mockPlugins];
+    logScan(`[cache] Returning ${cachedPlugins.length} cached plugins.`);
+    return [...cachedPlugins];
+  },
+  async getScanLogs() {
+    return [...scanLogs];
+  },
+  async clearScanLogs() {
+    scanLogs.splice(0, scanLogs.length);
+    return true;
   },
   async loadPresets(pluginId) {
     return [...(mockPresets.get(pluginId) ?? [])];

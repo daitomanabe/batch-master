@@ -2,11 +2,12 @@ import { startTransition, useEffect, useState } from "react";
 
 import { BatchQueue } from "./components/BatchQueue";
 import { ChainEditor } from "./components/ChainEditor";
+import { DebugConsole } from "./components/DebugConsole";
 import { PluginLibrary } from "./components/PluginLibrary";
 import { SavedChains } from "./components/SavedChains";
 import { useBatchProgress } from "./hooks/useBatchProgress";
 import { useJUCEBridge } from "./hooks/useJUCEBridge";
-import type { ChainItem, Plugin, SavedChain } from "./types";
+import type { ChainItem, Plugin, SavedChain, ScanLogEvent } from "./types";
 
 const VST_SCAN_PATH = "/Library/Audio/Plug-Ins/VST3";
 
@@ -29,19 +30,51 @@ export default function App() {
   const [savedChains, setSavedChains] = useState<SavedChain[]>([]);
   const [chain, setChain] = useState<ChainItem[]>([]);
   const [presetCatalog, setPresetCatalog] = useState<Record<string, string[]>>({});
+  const [scanLogs, setScanLogs] = useState<string[]>([]);
+  const [scanning, setScanning] = useState(false);
   const [filter, setFilter] = useState("");
   const [status, setStatus] = useState("Ready.");
 
   useEffect(() => {
     void (async () => {
       const [initialPlugins, initialChains] = await Promise.all([
-        backend.scanPlugins(VST_SCAN_PATH),
+        backend.getPluginList(),
         backend.getSavedChains(),
       ]);
       setPlugins(initialPlugins);
       setSavedChains(initialChains);
-      setStatus(`Scanned ${initialPlugins.length} plugins from ${VST_SCAN_PATH}.`);
+      setStatus(
+        initialPlugins.length > 0
+          ? `Loaded ${initialPlugins.length} cached plugins from ${VST_SCAN_PATH}.`
+          : `No cached plugins yet. Click Refresh to scan ${VST_SCAN_PATH}.`,
+      );
     })();
+  }, [backend]);
+
+  useEffect(() => {
+    let disposed = false;
+
+    void (async () => {
+      const lines = await backend.getScanLogs();
+
+      if (!disposed) {
+        setScanLogs(lines);
+      }
+    })();
+
+    const token = backend.addEventListener("scan.log", (payload) => {
+      if (disposed) {
+        return;
+      }
+
+      const event = payload as ScanLogEvent;
+      setScanLogs((current) => [...current, event.line].slice(-500));
+    });
+
+    return () => {
+      disposed = true;
+      backend.removeEventListener(token);
+    };
   }, [backend]);
 
   useEffect(() => {
@@ -75,11 +108,22 @@ export default function App() {
 
   const handleScan = async () => {
     setStatus("Scanning plugins...");
-    const nextPlugins = await backend.scanPlugins(VST_SCAN_PATH);
-    startTransition(() => {
-      setPlugins(nextPlugins);
-    });
-    setStatus(`Scan complete: ${nextPlugins.length} plugins from ${VST_SCAN_PATH}.`);
+    setScanning(true);
+
+    try {
+      const nextPlugins = await backend.scanPlugins(VST_SCAN_PATH);
+      startTransition(() => {
+        setPlugins(nextPlugins);
+      });
+      setStatus(`Scan complete: ${nextPlugins.length} plugins from ${VST_SCAN_PATH}.`);
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const handleClearConsole = async () => {
+    await backend.clearScanLogs();
+    setScanLogs([]);
   };
 
   const handleAddPlugin = async (plugin: Plugin) => {
@@ -239,6 +283,7 @@ export default function App() {
         <PluginLibrary
           plugins={plugins}
           scanPath={VST_SCAN_PATH}
+          scanning={scanning}
           filter={filter}
           onFilterChange={setFilter}
           onScan={handleScan}
@@ -257,6 +302,7 @@ export default function App() {
 
         <SavedChains chains={savedChains} onSave={handleSave} onLoad={handleLoadSavedChain} />
         <BatchQueue snapshot={snapshot} onAddJob={handleAddJob} onStart={handleStart} onCancel={handleCancel} />
+        <DebugConsole lines={scanLogs} scanning={scanning} onClear={handleClearConsole} />
       </section>
     </main>
   );

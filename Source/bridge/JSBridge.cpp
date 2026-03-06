@@ -1,11 +1,18 @@
 #include "JSBridge.h"
 
+#include <thread>
+
 namespace batchmaster
 {
 JSBridge::JSBridge()
     : previewChain(scanner, presetManager),
       batchProcessor(scanner, presetManager)
 {
+    scanner.setLogCallback([this] (const juce::String& line)
+    {
+        appendScanLog(line);
+    });
+
     batchProcessor.setProgressCallback([this] (const BatchJob& job, bool done)
     {
         emitProgressEvent(job, done);
@@ -23,12 +30,36 @@ juce::WebBrowserComponent::Options JSBridge::extendOptions(juce::WebBrowserCompo
 
     options = options.withNativeFunction("scanPlugins", [this] (const NativeArguments& arguments, NativeCompletion completion)
     {
-        completion(pluginArrayToVar(scanner.scanPlugins(getStringArgument(arguments, 0))));
+        const auto requestedPath = getStringArgument(arguments, 0);
+        std::thread([this, requestedPath, completion] () mutable
+        {
+            const auto plugins = scanner.scanPlugins(requestedPath);
+            const auto payload = pluginArrayToVar(plugins);
+            auto nativeCompletion = std::move(completion);
+
+            juce::MessageManager::callAsync([completionFn = std::move(nativeCompletion), payload] () mutable
+            {
+                completionFn(payload);
+            });
+        }).detach();
     });
 
     options = options.withNativeFunction("getPluginList", [this] (const NativeArguments&, NativeCompletion completion)
     {
+        appendScanLog("[cache] Returning " + juce::String(scanner.getCachedPlugins().size()) + " cached plugins.");
         completion(pluginArrayToVar(scanner.getCachedPlugins()));
+    });
+
+    options = options.withNativeFunction("getScanLogs", [this] (const NativeArguments&, NativeCompletion completion)
+    {
+        const juce::ScopedLock scopedLock(scanLogLock);
+        completion(stringArrayToVar(scanLogs));
+    });
+
+    options = options.withNativeFunction("clearScanLogs", [this] (const NativeArguments&, NativeCompletion completion)
+    {
+        clearScanLogs();
+        completion(true);
     });
 
     options = options.withNativeFunction("loadPresets", [this] (const NativeArguments& arguments, NativeCompletion completion)
@@ -129,6 +160,39 @@ juce::var JSBridge::savedChainsToVar(const juce::Array<SavedChain>& chains)
         array.add(savedChainToVar(chain));
 
     return juce::var(array);
+}
+
+void JSBridge::appendScanLog(const juce::String& line)
+{
+    const auto timestampedLine = "[" + juce::Time::getCurrentTime().formatted("%H:%M:%S") + "] " + line;
+
+    {
+        const juce::ScopedLock scopedLock(scanLogLock);
+        scanLogs.add(timestampedLine);
+
+        while (scanLogs.size() > 500)
+            scanLogs.remove(0);
+    }
+
+    if (browser == nullptr)
+        return;
+
+    const auto payload = makeObject({
+        { "type", "scan.log" },
+        { "line", timestampedLine }
+    });
+
+    juce::MessageManager::callAsync([attachedBrowser = browser, payload]
+    {
+        if (attachedBrowser != nullptr)
+            attachedBrowser->emitEventIfBrowserIsVisible(juce::Identifier("scan.log"), payload);
+    });
+}
+
+void JSBridge::clearScanLogs()
+{
+    const juce::ScopedLock scopedLock(scanLogLock);
+    scanLogs.clear();
 }
 
 void JSBridge::emitProgressEvent(const BatchJob& job, bool done)

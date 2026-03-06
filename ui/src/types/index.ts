@@ -59,12 +59,19 @@ export type BatchDoneEvent = {
   elapsed: number;
 };
 
-export type BackendEvent = ProgressEvent | BatchDoneEvent;
+export type ScanLogEvent = {
+  type: "scan.log";
+  line: string;
+};
+
+export type BackendEvent = ProgressEvent | BatchDoneEvent | ScanLogEvent;
 
 export type BackendBridge = {
   isNative: boolean;
   scanPlugins(folderPath: string): Promise<Plugin[]>;
   getPluginList(): Promise<Plugin[]>;
+  getScanLogs(): Promise<string[]>;
+  clearScanLogs(): Promise<boolean>;
   loadPresets(pluginId: string): Promise<string[]>;
   loadPresetFile(pluginId: string, filePath: string): Promise<boolean>;
   loadChain(chainJSON: string): Promise<boolean>;

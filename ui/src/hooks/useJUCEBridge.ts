@@ -42,6 +42,8 @@ function createNativeBridge(backend: NativeBackend): BackendBridge {
     isNative: true,
     scanPlugins: (folderPath) => call("scanPlugins", folderPath),
     getPluginList: () => call("getPluginList"),
+    getScanLogs: async () => (await call<string[]>("getScanLogs")) ?? [],
+    clearScanLogs: () => call("clearScanLogs"),
     loadPresets: (pluginId) => call("loadPresets", pluginId),
     loadPresetFile: (pluginId, filePath) => call("loadPresetFile", pluginId, filePath),
     loadChain: (chainJSON) => call("loadChain", chainJSON),

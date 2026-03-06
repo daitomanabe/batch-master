@@ -5,6 +5,7 @@ import type { Plugin } from "../types";
 type PluginLibraryProps = {
   plugins: Plugin[];
   scanPath: string;
+  scanning: boolean;
   filter: string;
   onFilterChange: (value: string) => void;
   onScan: () => void;
@@ -14,6 +15,7 @@ type PluginLibraryProps = {
 export function PluginLibrary({
   plugins,
   scanPath,
+  scanning,
   filter,
   onFilterChange,
   onScan,
@@ -33,8 +35,8 @@ export function PluginLibrary({
           <p className="eyebrow">Scan</p>
           <h2>Plugin Library</h2>
         </div>
-        <button className="button button-primary" onClick={onScan}>
-          Refresh
+        <button className="button button-primary" onClick={onScan} disabled={scanning}>
+          {scanning ? "Scanning..." : "Refresh"}
         </button>
       </div>
 
