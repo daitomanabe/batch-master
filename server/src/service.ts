@@ -339,6 +339,43 @@ export class BatchMasterService {
     this.emitState();
   }
 
+  removeJob(jobId: string) {
+    const job = this.mustGetJob(jobId);
+
+    if (job.status === "processing") {
+      throw new Error("Processing jobs cannot be removed.");
+    }
+
+    const runRoot = path.join(RUNS_DIR, job.id);
+
+    if (existsSync(runRoot)) {
+      rmSync(runRoot, { recursive: true, force: true });
+    }
+
+    this.jobs = this.jobs.filter((entry) => entry.id !== jobId);
+    this.saveJobs();
+    this.refreshEngineCounters();
+    this.log(`Removed job ${job.id}.`);
+    this.emitState();
+  }
+
+  retryJob(jobId: string) {
+    const sourceJob = this.mustGetJob(jobId);
+
+    if (sourceJob.status === "processing") {
+      throw new Error("Processing jobs cannot be retried.");
+    }
+
+    const queuedJob = this.addJob({
+      profileId: sourceJob.profileId,
+      inputPath: sourceJob.inputPath,
+      outputPath: sourceJob.outputPath,
+    });
+
+    this.log(`Retried job ${sourceJob.id} as ${queuedJob.id}.`);
+    return queuedJob;
+  }
+
   async startBatch() {
     this.refreshEnvironment(false);
 

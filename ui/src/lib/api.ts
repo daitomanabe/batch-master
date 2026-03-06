@@ -60,6 +60,18 @@ export async function addJob(input: AddJobInput) {
   });
 }
 
+export async function retryJob(jobId: string) {
+  return request(`/api/jobs/${jobId}/retry`, {
+    method: "POST",
+  });
+}
+
+export async function removeJob(jobId: string) {
+  return request<void>(`/api/jobs/${jobId}`, {
+    method: "DELETE",
+  });
+}
+
 export async function clearFinishedJobs() {
   return request<void>("/api/jobs/clear-finished", { method: "POST" });
 }

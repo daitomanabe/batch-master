@@ -55,6 +55,24 @@ app.post("/api/jobs", (request, response) => {
   }
 });
 
+app.post("/api/jobs/:jobId/retry", (request, response) => {
+  try {
+    const job = service.retryJob(request.params.jobId);
+    response.status(201).json(job);
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "Could not retry job." });
+  }
+});
+
+app.delete("/api/jobs/:jobId", (request, response) => {
+  try {
+    service.removeJob(request.params.jobId);
+    response.status(204).end();
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "Could not remove job." });
+  }
+});
+
 app.post("/api/jobs/clear-finished", (_request, response) => {
   service.clearFinishedJobs();
   response.status(204).end();

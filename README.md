@@ -6,7 +6,9 @@ BatchMaster is a local batch renderer that uses the installed REAPER application
 
 - Stores reusable render profiles that point at `.RfxChain` files.
 - Queues multiple input/output jobs.
+- Suggests output filenames from the selected profile and source file.
 - Launches REAPER in `-batchconvert` mode one job at a time.
+- Lets you retry or remove completed jobs from the queue history.
 - Streams REAPER splash logs and BatchMaster engine logs into a debug console.
 - Persists jobs, profiles, and logs in `~/Library/Application Support/BatchMaster`.
 

@@ -13,6 +13,8 @@ import {
   deleteProfile,
   fetchBootstrap,
   refreshEnvironment,
+  removeJob,
+  retryJob,
   startBatch,
   subscribeToEvents,
 } from "./lib/api";
@@ -155,7 +157,12 @@ export default function App() {
           onStart={() => runAction("Batch started.", async () => void (await startBatch()))}
           onCancel={() => runAction("Batch cancellation requested.", async () => void (await cancelBatch()))}
         />
-        <JobsPanel jobs={jobs} onClearFinished={() => runAction("Finished jobs cleared.", async () => void (await clearFinishedJobs()))} />
+        <JobsPanel
+          jobs={jobs}
+          onRetry={(jobId) => runAction("Job re-queued.", async () => void (await retryJob(jobId)))}
+          onRemove={(jobId) => runAction("Job removed.", async () => void (await removeJob(jobId)))}
+          onClearFinished={() => runAction("Finished jobs cleared.", async () => void (await clearFinishedJobs()))}
+        />
         <LogConsole lines={logs} />
       </section>
     </main>
