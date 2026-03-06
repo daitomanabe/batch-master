@@ -13,6 +13,12 @@ type AddJobInput = {
   outputPath: string;
 };
 
+type AddBatchJobsInput = {
+  profileId: string;
+  inputPaths: string[];
+  outputDirectory?: string;
+};
+
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const response = await fetch(input, {
     ...init,
@@ -49,12 +55,35 @@ export async function createProfile(input: CreateProfileInput) {
   });
 }
 
+export async function updateProfile(
+  profileId: string,
+  input: {
+    name?: string;
+    fxChainSourcePath?: string;
+    notes?: string;
+    copyToManagedStore?: boolean;
+    clearFxChain?: boolean;
+  },
+) {
+  return request<RenderProfile>(`/api/profiles/${profileId}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
 export async function deleteProfile(profileId: string) {
   return request<void>(`/api/profiles/${profileId}`, { method: "DELETE" });
 }
 
 export async function addJob(input: AddJobInput) {
   return request("/api/jobs", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function addBatchJobs(input: AddBatchJobsInput) {
+  return request("/api/jobs/batch", {
     method: "POST",
     body: JSON.stringify(input),
   });

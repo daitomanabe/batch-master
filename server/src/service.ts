@@ -23,10 +23,24 @@ type ProfileInput = {
   copyToManagedStore?: boolean;
 };
 
+type ProfileUpdateInput = {
+  name?: string;
+  fxChainSourcePath?: string;
+  notes?: string;
+  copyToManagedStore?: boolean;
+  clearFxChain?: boolean;
+};
+
 type JobInput = {
   profileId: string;
   inputPath: string;
   outputPath: string;
+};
+
+type BatchJobInput = {
+  profileId: string;
+  inputPaths: string[];
+  outputDirectory?: string;
 };
 
 const REAPER_BINARY = process.env.BM_REAPER_PATH ?? "/Applications/REAPER.app/Contents/MacOS/REAPER";
@@ -86,6 +100,35 @@ function readJsonFile<T>(filePath: string, fallback: T): T {
 
 function writeJsonFile(filePath: string, value: unknown) {
   writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function buildOutputPathForInput(inputPath: string, profileName: string, outputDirectory?: string) {
+  const parsed = path.parse(inputPath);
+  const directory = outputDirectory?.trim() || parsed.dir;
+  const extension = parsed.ext || ".wav";
+  const baseName = `${parsed.name}--${slugify(profileName) || "render"}${extension}`;
+  return path.join(directory, baseName);
+}
+
+function ensureUniqueOutputPath(outputPath: string, usedPaths: Set<string>) {
+  if (!usedPaths.has(outputPath)) {
+    usedPaths.add(outputPath);
+    return outputPath;
+  }
+
+  const parsed = path.parse(outputPath);
+  let index = 2;
+
+  while (true) {
+    const candidate = path.join(parsed.dir, `${parsed.name}-${index}${parsed.ext}`);
+
+    if (!usedPaths.has(candidate)) {
+      usedPaths.add(candidate);
+      return candidate;
+    }
+
+    index += 1;
+  }
 }
 
 export class BatchMasterService {
@@ -257,6 +300,81 @@ export class BatchMasterService {
     return profile;
   }
 
+  async updateProfile(profileId: string, input: ProfileUpdateInput) {
+    const target = this.profiles.find((profile) => profile.id === profileId);
+
+    if (!target) {
+      throw new Error("Profile not found.");
+    }
+
+    const nextName = input.name?.trim() || target.name;
+    const nextNotes = input.notes?.trim() ?? target.notes;
+    const shouldClearFxChain = input.clearFxChain === true;
+    let nextFxChainPath = target.fxChainPath;
+    let nextImportedFxChainPath = target.importedFxChainPath;
+
+    if (!nextName) {
+      throw new Error("Profile name is required.");
+    }
+
+    if (shouldClearFxChain) {
+      if (target.importedFxChainPath && existsSync(target.importedFxChainPath)) {
+        rmSync(target.importedFxChainPath);
+      }
+
+      nextFxChainPath = null;
+      nextImportedFxChainPath = null;
+    } else if (typeof input.fxChainSourcePath === "string") {
+      const sourcePath = input.fxChainSourcePath.trim();
+
+      if (!sourcePath) {
+        if (target.importedFxChainPath && existsSync(target.importedFxChainPath)) {
+          rmSync(target.importedFxChainPath);
+        }
+
+        nextFxChainPath = null;
+        nextImportedFxChainPath = null;
+      } else {
+        if (!existsSync(sourcePath)) {
+          throw new Error("FX chain file does not exist.");
+        }
+
+        if (!sourcePath.toLowerCase().endsWith(".rfxchain")) {
+          throw new Error("FX chain must be a .RfxChain file.");
+        }
+
+        if (target.importedFxChainPath && target.importedFxChainPath !== sourcePath && existsSync(target.importedFxChainPath)) {
+          rmSync(target.importedFxChainPath);
+        }
+
+        if (input.copyToManagedStore ?? true) {
+          const targetName = `${slugify(nextName)}-${randomUUID().slice(0, 8)}.RfxChain`;
+          nextImportedFxChainPath = path.join(MANAGED_FXCHAINS_DIR, targetName);
+          await copyFile(sourcePath, nextImportedFxChainPath);
+          nextFxChainPath = nextImportedFxChainPath;
+        } else {
+          nextImportedFxChainPath = null;
+          nextFxChainPath = sourcePath;
+        }
+      }
+    }
+
+    const updatedProfile: RenderProfile = {
+      ...target,
+      name: nextName,
+      notes: nextNotes,
+      fxChainPath: nextFxChainPath,
+      importedFxChainPath: nextImportedFxChainPath,
+      updatedAt: nowIso(),
+    };
+
+    this.profiles = this.profiles.map((profile) => (profile.id === profileId ? updatedProfile : profile));
+    this.saveProfiles();
+    this.log(`Profile updated: ${updatedProfile.name}`);
+    this.emitState();
+    return updatedProfile;
+  }
+
   deleteProfile(profileId: string) {
     const target = this.profiles.find((profile) => profile.id === profileId);
 
@@ -329,6 +447,41 @@ export class BatchMasterService {
     this.log(`Queued job ${job.id}: ${job.inputPath} -> ${job.outputPath} [${job.profileName}]`);
     this.emitState();
     return job;
+  }
+
+  addJobsBatch(input: BatchJobInput) {
+    const profile = this.profiles.find((entry) => entry.id === input.profileId);
+    const outputDirectory = input.outputDirectory?.trim() ?? "";
+    const normalizedInputs = Array.from(new Set(input.inputPaths.map((entry) => entry.trim()).filter(Boolean)));
+
+    if (!profile) {
+      throw new Error("Profile not found.");
+    }
+
+    if (normalizedInputs.length === 0) {
+      throw new Error("At least one input file is required.");
+    }
+
+    if (outputDirectory && !path.isAbsolute(outputDirectory)) {
+      throw new Error("Output directory must be an absolute path.");
+    }
+
+    const usedOutputs = new Set<string>();
+    const jobs = normalizedInputs.map((inputPath) => {
+      const outputPath = ensureUniqueOutputPath(
+        buildOutputPathForInput(inputPath, profile.name, outputDirectory),
+        usedOutputs,
+      );
+
+      return this.addJob({
+        profileId: profile.id,
+        inputPath,
+        outputPath,
+      });
+    });
+
+    this.log(`Queued ${jobs.length} jobs in batch for profile ${profile.name}.`);
+    return jobs;
   }
 
   clearFinishedJobs() {

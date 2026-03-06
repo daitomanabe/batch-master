@@ -7,6 +7,7 @@ import { QueuePanel } from "./components/QueuePanel";
 import { ReaperStatusPanel } from "./components/ReaperStatusPanel";
 import {
   addJob,
+  addBatchJobs,
   cancelBatch,
   clearFinishedJobs,
   createProfile,
@@ -17,6 +18,7 @@ import {
   retryJob,
   startBatch,
   subscribeToEvents,
+  updateProfile,
 } from "./lib/api";
 import type { BatchJob, EngineState, FxChainCandidate, ReaperInfo, RenderProfile, StatePayload } from "./types";
 
@@ -148,12 +150,14 @@ export default function App() {
           profiles={profiles}
           fxChains={fxChains}
           onCreate={(input) => runAction(`Profile created: ${input.name}`, async () => void (await createProfile(input)))}
+          onUpdate={(profileId, input) => runAction("Profile updated.", async () => void (await updateProfile(profileId, input)))}
           onDelete={(profileId) => runAction("Profile deleted.", async () => void (await deleteProfile(profileId)))}
         />
         <QueuePanel
           profiles={profiles}
           engine={engine}
           onAddJob={(input) => runAction("Job queued.", async () => void (await addJob(input)))}
+          onAddBatchJobs={(input) => runAction("Batch jobs queued.", async () => void (await addBatchJobs(input)))}
           onStart={() => runAction("Batch started.", async () => void (await startBatch()))}
           onCancel={() => runAction("Batch cancellation requested.", async () => void (await cancelBatch()))}
         />

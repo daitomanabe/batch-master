@@ -6,6 +6,7 @@ type QueuePanelProps = {
   profiles: RenderProfile[];
   engine: EngineState;
   onAddJob: (input: { profileId: string; inputPath: string; outputPath: string }) => Promise<void>;
+  onAddBatchJobs: (input: { profileId: string; inputPaths: string[]; outputDirectory?: string }) => Promise<void>;
   onStart: () => Promise<void>;
   onCancel: () => Promise<void>;
 };
@@ -36,12 +37,16 @@ function buildSuggestedOutputPath(inputPath: string, profileName: string) {
   return directory ? `${directory}/${suggestedFileName}` : suggestedFileName;
 }
 
-export function QueuePanel({ profiles, engine, onAddJob, onStart, onCancel }: QueuePanelProps) {
+export function QueuePanel({ profiles, engine, onAddJob, onAddBatchJobs, onStart, onCancel }: QueuePanelProps) {
   const [profileId, setProfileId] = useState(profiles[0]?.id ?? "");
   const [inputPath, setInputPath] = useState("");
   const [outputPath, setOutputPath] = useState("");
   const [lastSuggestedOutput, setLastSuggestedOutput] = useState("");
+  const [bulkInputPaths, setBulkInputPaths] = useState("");
+  const [bulkOutputDirectory, setBulkOutputDirectory] = useState("");
   const canQueue = Boolean(profileId && inputPath.trim() && outputPath.trim());
+  const batchInputPaths = Array.from(new Set(bulkInputPaths.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean)));
+  const canQueueBatch = Boolean(profileId && batchInputPaths.length > 0);
   const activeProfile = profiles.find((profile) => profile.id === profileId) ?? null;
 
   useEffect(() => {
@@ -70,6 +75,16 @@ export function QueuePanel({ profiles, engine, onAddJob, onStart, onCancel }: Qu
     setInputPath("");
     setOutputPath("");
     setLastSuggestedOutput("");
+  };
+
+  const submitBatch = async () => {
+    await onAddBatchJobs({
+      profileId,
+      inputPaths: batchInputPaths,
+      outputDirectory: bulkOutputDirectory.trim() || undefined,
+    });
+    setBulkInputPaths("");
+    setBulkOutputDirectory("");
   };
 
   return (
@@ -120,6 +135,40 @@ export function QueuePanel({ profiles, engine, onAddJob, onStart, onCancel }: Qu
         <button className="button" onClick={submit} disabled={!canQueue}>
           Queue file
         </button>
+      </div>
+
+      <div className="bulk-queue">
+        <div className="section-title">
+          <h3>Bulk Queue</h3>
+          <p>Paste multiple absolute input paths. Leave output directory empty to write beside each source file.</p>
+        </div>
+
+        <div className="form-grid">
+          <label>
+            <span>Input files</span>
+            <textarea
+              value={bulkInputPaths}
+              onChange={(event) => setBulkInputPaths(event.target.value)}
+              placeholder={"/path/to/track-01.wav\n/path/to/track-02.wav"}
+              rows={6}
+            />
+          </label>
+
+          <label>
+            <span>Output directory (optional)</span>
+            <input
+              value={bulkOutputDirectory}
+              onChange={(event) => setBulkOutputDirectory(event.target.value)}
+              placeholder="/path/to/render-output"
+            />
+          </label>
+
+          <p className="field-hint">{batchInputPaths.length} file(s) ready to queue.</p>
+
+          <button className="button" onClick={submitBatch} disabled={!canQueueBatch}>
+            Queue listed files
+          </button>
+        </div>
       </div>
     </section>
   );

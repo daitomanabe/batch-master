@@ -8,7 +8,9 @@ BatchMaster is a local batch renderer that delegates offline FX processing to RE
 
 - Detect the installed REAPER binary at `/Applications/REAPER.app/Contents/MacOS/REAPER`.
 - Persist reusable render profiles that reference `.RfxChain` files or a dry pass-through mode.
+- Allow existing profiles to be edited after creation.
 - Queue multiple offline jobs with independent input and output paths.
+- Allow multiple input files to be queued in a single batch action.
 - Execute jobs sequentially via REAPER `-batchconvert`.
 - Persist profiles, queue state, engine state, and log files under `~/Library/Application Support/BatchMaster`.
 - Surface REAPER splash log output and engine log output in a debug console UI.

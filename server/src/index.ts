@@ -37,6 +37,21 @@ app.post("/api/profiles", async (request, response) => {
   }
 });
 
+app.patch("/api/profiles/:profileId", async (request, response) => {
+  try {
+    const profile = await service.updateProfile(request.params.profileId, request.body as {
+      name?: string;
+      fxChainSourcePath?: string;
+      notes?: string;
+      copyToManagedStore?: boolean;
+      clearFxChain?: boolean;
+    });
+    response.json(profile);
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "Could not update profile." });
+  }
+});
+
 app.delete("/api/profiles/:profileId", (request, response) => {
   try {
     service.deleteProfile(request.params.profileId);
@@ -52,6 +67,15 @@ app.post("/api/jobs", (request, response) => {
     response.status(201).json(job);
   } catch (error) {
     response.status(400).json({ error: error instanceof Error ? error.message : "Could not add job." });
+  }
+});
+
+app.post("/api/jobs/batch", (request, response) => {
+  try {
+    const jobs = service.addJobsBatch(request.body as { profileId: string; inputPaths: string[]; outputDirectory?: string });
+    response.status(201).json(jobs);
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "Could not add batch jobs." });
   }
 });
 
