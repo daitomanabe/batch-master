@@ -165,6 +165,7 @@ juce::var JSBridge::savedChainsToVar(const juce::Array<SavedChain>& chains)
 void JSBridge::appendScanLog(const juce::String& line)
 {
     const auto timestampedLine = "[" + juce::Time::getCurrentTime().formatted("%H:%M:%S") + "] " + line;
+    juce::Logger::writeToLog(timestampedLine);
 
     {
         const juce::ScopedLock scopedLock(scanLogLock);

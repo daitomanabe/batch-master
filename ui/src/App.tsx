@@ -78,6 +78,32 @@ export default function App() {
   }, [backend]);
 
   useEffect(() => {
+    if (!scanning) {
+      return;
+    }
+
+    let disposed = false;
+
+    const syncScanLogs = async () => {
+      const lines = await backend.getScanLogs();
+
+      if (!disposed) {
+        setScanLogs(lines);
+      }
+    };
+
+    void syncScanLogs();
+    const intervalId = window.setInterval(() => {
+      void syncScanLogs();
+    }, 250);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+    };
+  }, [backend, scanning]);
+
+  useEffect(() => {
     if (chain.length === 0) {
       return;
     }
@@ -109,6 +135,9 @@ export default function App() {
   const handleScan = async () => {
     setStatus("Scanning plugins...");
     setScanning(true);
+    setScanLogs((current) =>
+      current.length === 0 ? [`[${new Date().toLocaleTimeString("ja-JP", { hour12: false })}] [ui] Scan requested.`] : current,
+    );
 
     try {
       const nextPlugins = await backend.scanPlugins(VST_SCAN_PATH);
