@@ -37,6 +37,20 @@ export type PluginCatalogState = {
   lastUpdatedAt: string | null;
 };
 
+export type PluginEditorSession = {
+  id: string;
+  pluginId: string;
+  pluginName: string;
+  pluginVendor: string;
+  pluginFormat: PluginInfo["format"] | "";
+  projectPath: string;
+  fxChainPath: string;
+  launchScriptPath: string;
+  touchedAt: string;
+  hasProject: boolean;
+  hasFxChain: boolean;
+};
+
 export type BatchJob = {
   id: string;
   profileId: string;
@@ -78,13 +92,14 @@ export type FxChainCandidate = {
   id: string;
   name: string;
   path: string;
-  source: "reaper" | "managed";
+  source: "reaper" | "managed" | "session";
 };
 
 export type BootstrapPayload = {
   profiles: RenderProfile[];
   savedSettings: SavedBatchSettings[];
   pluginCatalog: PluginCatalogState;
+  editorSessions: PluginEditorSession[];
   jobs: BatchJob[];
   engine: EngineState;
   logs: string[];

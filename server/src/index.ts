@@ -125,14 +125,43 @@ app.post("/api/jobs/folder", (request, response) => {
 app.post("/api/simple-batch/run", async (request, response) => {
   try {
     const result = await service.runSimpleFolderBatch(request.body as {
-      pluginName: string;
-      fxChainSourcePath?: string;
+      profileName?: string;
+      fxChainSourcePath: string;
       inputDirectory: string;
       recursive?: boolean;
     });
     response.json(result);
   } catch (error) {
     response.status(400).json({ error: error instanceof Error ? error.message : "Could not start simple batch." });
+  }
+});
+
+app.post("/api/simple-batch/editor/open", async (request, response) => {
+  try {
+    const session = await service.openPluginEditorSession(request.body as {
+      pluginId: string;
+      pluginName: string;
+      pluginVendor?: string;
+      pluginFormat?: "VST" | "VST3" | "AU" | "CLAP";
+      fxChainSourcePath?: string;
+    });
+    response.json(session);
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "Could not open plugin editor." });
+  }
+});
+
+app.post("/api/simple-batch/editor/capture", (request, response) => {
+  try {
+    const session = service.capturePluginEditorSession(request.body as {
+      pluginId: string;
+      pluginName: string;
+      pluginVendor?: string;
+      pluginFormat?: "VST" | "VST3" | "AU" | "CLAP";
+    });
+    response.json(session);
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "Could not capture plugin settings." });
   }
 });
 

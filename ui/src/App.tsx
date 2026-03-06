@@ -144,7 +144,7 @@ export default function App() {
           <p className="eyebrow">Production workflow</p>
           <h1>BatchMaster for REAPER</h1>
           <p className="hero-copy">
-            Choose a folder, choose a plugin and its `.RfxChain` setting, then batch export.
+            Choose a folder, choose a saved `.RfxChain`, then batch export.
           </p>
         </div>
         <div className="hero-status">
@@ -166,7 +166,6 @@ export default function App() {
           onRefreshPlugins={() => void runAction("Plugin catalog refreshed.", async () => void (await refreshPluginCatalog()))}
         />
         <SimpleBatchPanel
-          pluginCatalog={pluginCatalog}
           fxChains={fxChains}
           engine={engine}
           onPickInputFolder={() => openFolderDialog({ prompt: "Choose input WAV folder" })}

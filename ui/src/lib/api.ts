@@ -1,4 +1,10 @@
-import type { BootstrapPayload, PluginCatalogState, RenderProfile, SavedBatchSettings, StatePayload } from "../types";
+import type {
+  BootstrapPayload,
+  PluginCatalogState,
+  RenderProfile,
+  SavedBatchSettings,
+  StatePayload,
+} from "../types";
 
 type CreateProfileInput = {
   name: string;
@@ -35,8 +41,8 @@ type SavedSettingsInput = {
 };
 
 type SimpleBatchRunInput = {
-  pluginName: string;
-  fxChainSourcePath?: string;
+  profileName?: string;
+  fxChainSourcePath: string;
   inputDirectory: string;
   recursive?: boolean;
 };

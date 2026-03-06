@@ -12,6 +12,7 @@ import type {
   EngineState,
   FxChainCandidate,
   PluginCatalogState,
+  PluginEditorSession,
   PluginInfo,
   ReaperInfo,
   RenderProfile,
@@ -69,9 +70,16 @@ type SavedSettingsUpdateInput = {
   recursive?: boolean;
 };
 
-type SimpleBatchInput = {
+type PluginSelectionInput = {
+  pluginId: string;
   pluginName: string;
-  fxChainSourcePath?: string;
+  pluginVendor?: string;
+  pluginFormat?: PluginInfo["format"] | "";
+};
+
+type SimpleBatchInput = {
+  profileName?: string;
+  fxChainSourcePath: string;
   inputDirectory: string;
   recursive?: boolean;
 };
@@ -80,11 +88,13 @@ const REAPER_BINARY = process.env.BM_REAPER_PATH ?? "/Applications/REAPER.app/Co
 const REAPER_RESOURCE_DIR = path.join(os.homedir(), "Library/Application Support/REAPER");
 const APP_DATA_DIR = path.join(os.homedir(), "Library/Application Support/BatchMaster");
 const MANAGED_FXCHAINS_DIR = path.join(APP_DATA_DIR, "fxchains");
+const EDITOR_SESSIONS_DIR = path.join(APP_DATA_DIR, "editor-sessions");
 const RUNS_DIR = path.join(APP_DATA_DIR, "runs");
 const LOGS_DIR = path.join(APP_DATA_DIR, "logs");
 const PROFILES_PATH = path.join(APP_DATA_DIR, "profiles.json");
 const SAVED_SETTINGS_PATH = path.join(APP_DATA_DIR, "saved-settings.json");
 const PLUGIN_CACHE_PATH = path.join(APP_DATA_DIR, "plugin-cache.json");
+const EDITOR_SESSIONS_PATH = path.join(APP_DATA_DIR, "editor-sessions.json");
 const JOBS_PATH = path.join(APP_DATA_DIR, "jobs.json");
 const ENGINE_LOG_PATH = path.join(LOGS_DIR, "engine.log");
 
@@ -405,6 +415,10 @@ function escapeAppleScriptString(value: string) {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
+function escapeLuaString(value: string) {
+  return JSON.stringify(value);
+}
+
 function runAppleScript(lines: string[]) {
   const result = spawnSync(
     "osascript",
@@ -426,6 +440,7 @@ export class BatchMasterService {
   private profiles: RenderProfile[];
   private savedSettings: SavedBatchSettings[];
   private pluginCatalog: PluginCatalogState;
+  private editorSessions: PluginEditorSession[];
   private jobs: BatchJob[];
   private logs: string[];
   private engine = { ...EMPTY_ENGINE_STATE };
@@ -436,6 +451,7 @@ export class BatchMasterService {
   constructor() {
     ensureDir(APP_DATA_DIR);
     ensureDir(MANAGED_FXCHAINS_DIR);
+    ensureDir(EDITOR_SESSIONS_DIR);
     ensureDir(RUNS_DIR);
     ensureDir(LOGS_DIR);
 
@@ -443,6 +459,7 @@ export class BatchMasterService {
     this.profiles = readJsonFile<RenderProfile[]>(PROFILES_PATH, []);
     this.savedSettings = readJsonFile<SavedBatchSettings[]>(SAVED_SETTINGS_PATH, []);
     this.pluginCatalog = this.loadPluginCatalog();
+    this.editorSessions = readJsonFile<PluginEditorSession[]>(EDITOR_SESSIONS_PATH, []).map((session) => this.syncEditorSession(session));
     this.jobs = readJsonFile<BatchJob[]>(JOBS_PATH, []).map((job) => ({
       ...job,
       progress: job.status === "done" ? 1 : job.status === "processing" ? 0 : job.progress ?? 0,
@@ -480,6 +497,7 @@ export class BatchMasterService {
       profiles: this.profiles,
       savedSettings: this.savedSettings,
       pluginCatalog: this.pluginCatalog,
+      editorSessions: this.editorSessions,
       jobs: this.jobs,
       engine: this.engine,
       logs: this.logs,
@@ -493,6 +511,7 @@ export class BatchMasterService {
       profiles: this.profiles,
       savedSettings: this.savedSettings,
       pluginCatalog: this.pluginCatalog,
+      editorSessions: this.editorSessions,
       jobs: this.jobs,
       engine: this.engine,
       reaper: this.reaperInfo,
@@ -544,8 +563,85 @@ export class BatchMasterService {
 
     collect(path.join(REAPER_RESOURCE_DIR, "FXChains"), "reaper");
     collect(MANAGED_FXCHAINS_DIR, "managed");
+    collect(EDITOR_SESSIONS_DIR, "session");
 
     return candidates.sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  async openPluginEditorSession(input: PluginSelectionInput & { fxChainSourcePath?: string }) {
+    this.refreshEnvironment(false);
+
+    if (!this.reaperInfo.available) {
+      throw new Error("REAPER binary was not found.");
+    }
+
+    const plugin = this.normalizePluginSelectionInput(input);
+    const session = this.getOrCreateEditorSession(plugin);
+    const projectExists = existsSync(session.projectPath);
+    const script = this.buildEditorLaunchScript({
+      plugin,
+      projectPath: session.projectPath,
+      fxChainSourcePath: projectExists ? "" : input.fxChainSourcePath?.trim() ?? "",
+      initializeProject: !projectExists,
+    });
+
+    writeFileSync(session.launchScriptPath, script, "utf8");
+
+    const args = projectExists
+      ? ["-newinst", "-nosplash", session.projectPath, session.launchScriptPath]
+      : ["-newinst", "-nosplash", "-new", session.launchScriptPath];
+
+    const child = spawn(this.reaperInfo.binaryPath, args, {
+      detached: true,
+      stdio: "ignore",
+    });
+
+    child.unref();
+
+    if (!projectExists) {
+      await this.waitForPath(session.projectPath, 10000);
+    }
+
+    const updatedSession = this.upsertEditorSession({
+      ...session,
+      touchedAt: nowIso(),
+      hasProject: existsSync(session.projectPath),
+      hasFxChain: existsSync(session.fxChainPath),
+    });
+
+    this.log(
+      `Opened plugin editor for ${plugin.pluginName}${projectExists ? " (existing session)" : ""} at ${updatedSession.projectPath}`,
+    );
+    this.emitState();
+    return updatedSession;
+  }
+
+  capturePluginEditorSession(input: PluginSelectionInput) {
+    const plugin = this.normalizePluginSelectionInput(input);
+    const session = this.getOrCreateEditorSession(plugin);
+
+    if (!existsSync(session.projectPath)) {
+      throw new Error("Plugin editor session project does not exist yet. Open the editor first.");
+    }
+
+    const fxChainBlock = this.extractFirstFxChainBlock(session.projectPath);
+
+    if (!fxChainBlock) {
+      throw new Error("No FX chain was found in the editor session. Save the project in REAPER and try again.");
+    }
+
+    writeFileSync(session.fxChainPath, `${fxChainBlock}\n`, "utf8");
+
+    const updatedSession = this.upsertEditorSession({
+      ...session,
+      touchedAt: nowIso(),
+      hasProject: true,
+      hasFxChain: true,
+    });
+
+    this.log(`Captured editor settings for ${plugin.pluginName} -> ${updatedSession.fxChainPath}`);
+    this.emitState();
+    return updatedSession;
   }
 
   async createProfile(input: ProfileInput) {
@@ -908,15 +1004,23 @@ export class BatchMasterService {
       throw new Error("Batch is already running.");
     }
 
-    const pluginName = input.pluginName.trim();
+    const fxChainSourcePath = input.fxChainSourcePath?.trim() ?? "";
     const inputDirectory = input.inputDirectory.trim();
-
-    if (!pluginName) {
-      throw new Error("Plugin name is required.");
-    }
+    const derivedProfileName = fxChainSourcePath
+      ? path.basename(fxChainSourcePath, path.extname(fxChainSourcePath)).trim()
+      : "";
+    const profileName = input.profileName?.trim() || derivedProfileName;
 
     if (!inputDirectory) {
       throw new Error("Input folder is required.");
+    }
+
+    if (!fxChainSourcePath) {
+      throw new Error("Choose a .RfxChain file before batch export.");
+    }
+
+    if (!profileName) {
+      throw new Error("Could not determine the output folder name from the .RfxChain file.");
     }
 
     this.jobs = [];
@@ -924,23 +1028,22 @@ export class BatchMasterService {
     this.refreshEngineCounters();
     this.emitState();
 
-    const existingProfile = this.profiles.find((profile) => profile.name === pluginName);
+    const existingProfile = this.profiles.find((profile) => profile.name === profileName);
     let profile: RenderProfile;
 
     if (existingProfile) {
       profile = await this.updateProfile(existingProfile.id, {
-        name: pluginName,
-        fxChainSourcePath: input.fxChainSourcePath ?? "",
+        name: profileName,
+        fxChainSourcePath,
         copyToManagedStore: true,
-        clearFxChain: !input.fxChainSourcePath?.trim(),
-        notes: `Auto-generated profile for ${pluginName}`,
+        notes: `Auto-generated profile for ${profileName}`,
       });
     } else {
       profile = await this.createProfile({
-        name: pluginName,
-        fxChainSourcePath: input.fxChainSourcePath ?? "",
+        name: profileName,
+        fxChainSourcePath,
         copyToManagedStore: true,
-        notes: `Auto-generated profile for ${pluginName}`,
+        notes: `Auto-generated profile for ${profileName}`,
       });
     }
 
@@ -1135,6 +1238,324 @@ export class BatchMasterService {
     return output.trim();
   }
 
+  private normalizePluginSelectionInput(input: PluginSelectionInput): {
+    pluginId: string;
+    pluginName: string;
+    pluginVendor: string;
+    pluginFormat: PluginInfo["format"] | "";
+  } {
+    const pluginId = input.pluginId?.trim() ?? "";
+    const pluginFromCatalog = pluginId ? this.pluginCatalog.plugins.find((plugin) => plugin.id === pluginId) : null;
+    const pluginName = pluginFromCatalog?.name ?? input.pluginName?.trim() ?? "";
+
+    if (!pluginId && !pluginName) {
+      throw new Error("Plugin selection is required.");
+    }
+
+    if (!pluginName) {
+      throw new Error("Plugin name is required.");
+    }
+
+    return {
+      pluginId: pluginFromCatalog?.id ?? pluginId,
+      pluginName,
+      pluginVendor: pluginFromCatalog?.vendor ?? input.pluginVendor?.trim() ?? "",
+      pluginFormat: (pluginFromCatalog?.format ?? input.pluginFormat ?? "") as PluginInfo["format"] | "",
+    };
+  }
+
+  private async waitForPath(filePath: string, timeoutMs: number) {
+    const startedAt = Date.now();
+
+    while (!existsSync(filePath)) {
+      if (Date.now() - startedAt >= timeoutMs) {
+        break;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+
+  private getOrCreateEditorSession(plugin: ReturnType<BatchMasterService["normalizePluginSelectionInput"]>) {
+    const existing = this.editorSessions.find((session) => session.pluginId === plugin.pluginId);
+
+    if (existing) {
+      return this.syncEditorSession(existing);
+    }
+
+    const id = buildId(`editor:${plugin.pluginId || plugin.pluginName}`);
+    const sessionDirectory = path.join(EDITOR_SESSIONS_DIR, `${slugify(plugin.pluginName)}-${id}`);
+
+    ensureDir(sessionDirectory);
+
+    const createdSession: PluginEditorSession = {
+      id,
+      pluginId: plugin.pluginId || id,
+      pluginName: plugin.pluginName,
+      pluginVendor: plugin.pluginVendor,
+      pluginFormat: plugin.pluginFormat,
+      projectPath: path.join(sessionDirectory, "editor-session.rpp"),
+      fxChainPath: path.join(sessionDirectory, `${sanitizePathSegment(plugin.pluginName)}.RfxChain`),
+      launchScriptPath: path.join(sessionDirectory, "open-plugin-editor.lua"),
+      touchedAt: nowIso(),
+      hasProject: false,
+      hasFxChain: false,
+    };
+
+    return this.upsertEditorSession(createdSession);
+  }
+
+  private upsertEditorSession(session: PluginEditorSession) {
+    const nextSession = this.syncEditorSession(session);
+    const matchIndex = this.editorSessions.findIndex((entry) => entry.pluginId === nextSession.pluginId);
+
+    if (matchIndex >= 0) {
+      this.editorSessions = this.editorSessions.map((entry, index) => (index === matchIndex ? nextSession : entry));
+    } else {
+      this.editorSessions = [nextSession, ...this.editorSessions];
+    }
+
+    this.saveEditorSessions();
+    return nextSession;
+  }
+
+  private syncEditorSession(session: PluginEditorSession): PluginEditorSession {
+    ensureDir(path.dirname(session.projectPath));
+
+    return {
+      ...session,
+      pluginVendor: session.pluginVendor ?? "",
+      pluginFormat: session.pluginFormat ?? "",
+      touchedAt: session.touchedAt ?? nowIso(),
+      hasProject: existsSync(session.projectPath),
+      hasFxChain: existsSync(session.fxChainPath),
+    };
+  }
+
+  private buildPluginInsertCandidates(plugin: ReturnType<BatchMasterService["normalizePluginSelectionInput"]>) {
+    const candidates = [
+      plugin.pluginFormat && plugin.pluginVendor ? `${plugin.pluginFormat}: ${plugin.pluginName} (${plugin.pluginVendor})` : "",
+      plugin.pluginFormat ? `${plugin.pluginFormat}: ${plugin.pluginName}` : "",
+      plugin.pluginName,
+    ].map((entry) => entry.trim()).filter(Boolean);
+
+    return Array.from(new Set(candidates));
+  }
+
+  private buildEditorLaunchScript(input: {
+    plugin: ReturnType<BatchMasterService["normalizePluginSelectionInput"]>;
+    projectPath: string;
+    fxChainSourcePath: string;
+    initializeProject: boolean;
+  }) {
+    const candidateList = this.buildPluginInsertCandidates(input.plugin)
+      .map((candidate) => `  ${escapeLuaString(candidate)}`)
+      .join(",\n");
+
+    return `local project_path = ${escapeLuaString(input.projectPath)}
+local chain_path = ${escapeLuaString(input.fxChainSourcePath)}
+local plugin_name = ${escapeLuaString(input.plugin.pluginName)}
+local initialize_project = ${input.initializeProject ? "true" : "false"}
+local plugin_candidates = {
+${candidateList}
+}
+
+local function read_text(file_path)
+  if file_path == "" then
+    return ""
+  end
+
+  local handle = io.open(file_path, "r")
+  if not handle then
+    return ""
+  end
+
+  local text = handle:read("*a") or ""
+  handle:close()
+  return text
+end
+
+local function trim_start(text)
+  return text:gsub("^%s+", "")
+end
+
+local function replace_block(chunk, block_name, replacement)
+  local output = {}
+  local collecting = false
+  local depth = 0
+  local found = false
+
+  for line in (chunk .. "\\n"):gmatch("(.-)\\n") do
+    local trimmed = trim_start(line)
+
+    if not collecting and trimmed:match("^<" .. block_name .. "[%s>]") then
+      collecting = true
+      found = true
+      depth = 1
+
+      for replacement_line in (replacement .. "\\n"):gmatch("(.-)\\n") do
+        output[#output + 1] = "    " .. replacement_line
+      end
+    elseif collecting then
+      if trimmed:sub(1, 1) == "<" then
+        depth = depth + 1
+      end
+
+      if trimmed == ">" then
+        depth = depth - 1
+        if depth == 0 then
+          collecting = false
+        end
+      end
+    else
+      output[#output + 1] = line
+    end
+  end
+
+  return found, table.concat(output, "\\n")
+end
+
+reaper.PreventUIRefresh(1)
+
+local track = reaper.GetTrack(0, 0)
+if not track then
+  reaper.InsertTrackAtIndex(0, false)
+  track = reaper.GetTrack(0, 0)
+end
+
+if track then
+  reaper.GetSetMediaTrackInfo_String(track, "P_NAME", plugin_name, true)
+end
+
+if track and reaper.TrackFX_GetCount(track) == 0 then
+  local inserted_fx = -1
+
+  for _, candidate in ipairs(plugin_candidates) do
+    inserted_fx = reaper.TrackFX_AddByName(track, candidate, false, -1)
+    if inserted_fx >= 0 then
+      break
+    end
+  end
+
+  if inserted_fx < 0 then
+    reaper.PreventUIRefresh(-1)
+    reaper.ShowMessageBox("BatchMaster could not insert " .. plugin_name .. ".", "BatchMaster", 0)
+    return
+  end
+end
+
+if track and initialize_project then
+  local chain_text = read_text(chain_path)
+  if chain_text ~= "" then
+    local ok, chunk = reaper.GetTrackStateChunk(track, "", false)
+    if ok then
+      local replaced, next_chunk = replace_block(chunk, "FXCHAIN", chain_text)
+      if replaced then
+        reaper.SetTrackStateChunk(track, next_chunk, false)
+      end
+    end
+  end
+end
+
+reaper.TrackList_AdjustWindows(false)
+reaper.UpdateArrange()
+
+if track and reaper.TrackFX_GetCount(track) > 0 then
+  reaper.TrackFX_Show(track, 0, 3)
+end
+
+reaper.Main_SaveProjectEx(0, project_path, 0)
+reaper.PreventUIRefresh(-1)
+`;
+  }
+
+  private resolveSimpleBatchFxChain(
+    plugin: ReturnType<BatchMasterService["normalizePluginSelectionInput"]>,
+    fxChainSourcePath?: string,
+  ) {
+    const explicitPath = fxChainSourcePath?.trim() ?? "";
+
+    if (explicitPath) {
+      return explicitPath;
+    }
+
+    const session = this.editorSessions.find((entry) => entry.pluginId === plugin.pluginId);
+
+    if (!session) {
+      return "";
+    }
+
+    if (existsSync(session.fxChainPath)) {
+      return session.fxChainPath;
+    }
+
+    if (existsSync(session.projectPath)) {
+      try {
+        return this.capturePluginEditorSession(plugin).fxChainPath;
+      } catch (error) {
+        this.log(
+          `Could not auto-capture editor settings for ${plugin.pluginName}: ${error instanceof Error ? error.message : "unknown error"}`,
+        );
+      }
+    }
+
+    return "";
+  }
+
+  private extractFirstFxChainBlock(projectPath: string) {
+    const lines = readFileSync(projectPath, "utf8").split(/\r?\n/);
+    const capturedLines: string[] = [];
+    let collecting = false;
+    let depth = 0;
+
+    for (const line of lines) {
+      const trimmed = line.trimStart();
+
+      if (!collecting && /^<FXCHAIN(?:\s|$)/.test(trimmed)) {
+        collecting = true;
+        depth = 1;
+        capturedLines.push(line);
+        continue;
+      }
+
+      if (!collecting) {
+        continue;
+      }
+
+      capturedLines.push(line);
+
+      if (trimmed.startsWith("<")) {
+        depth += 1;
+      }
+
+      if (trimmed === ">") {
+        depth -= 1;
+
+        if (depth === 0) {
+          return this.normalizeIndentedBlock(capturedLines);
+        }
+      }
+    }
+
+    return "";
+  }
+
+  private normalizeIndentedBlock(lines: string[]) {
+    const meaningfulLines = lines.filter((line) => line.trim().length > 0);
+
+    if (meaningfulLines.length === 0) {
+      return "";
+    }
+
+    const sharedIndentation = meaningfulLines.reduce((minimum, line) => {
+      const match = line.match(/^(\s*)/);
+      const indentLength = match ? match[1].length : 0;
+      return Math.min(minimum, indentLength);
+    }, Number.POSITIVE_INFINITY);
+
+    return lines.map((line) => line.slice(sharedIndentation)).join("\n").trimEnd();
+  }
+
   private async runLoop() {
     while (true) {
       const nextJob = this.jobs.find((job) => job.status === "queued");
@@ -1302,7 +1723,19 @@ export class BatchMasterService {
     const lines = [`${inputPath}\t${outputPath}`, "<CONFIG"];
 
     if (fxChainPath) {
-      lines.push(`  FXCHAIN '${fxChainPath.replace(/'/g, "'\\''")}'`);
+      if (!existsSync(fxChainPath)) {
+        throw new Error(`FX chain file does not exist: ${fxChainPath}`);
+      }
+
+      const fxChainContents = readFileSync(fxChainPath, "utf8").trimEnd();
+
+      if (!fxChainContents) {
+        throw new Error(`FX chain file is empty: ${fxChainPath}`);
+      }
+
+      for (const line of fxChainContents.split(/\r?\n/)) {
+        lines.push(`  ${line}`);
+      }
     }
 
     lines.push("  USESRCSTART 1");
@@ -1419,6 +1852,10 @@ export class BatchMasterService {
 
   private saveSavedSettings() {
     writeJsonFile(SAVED_SETTINGS_PATH, this.savedSettings);
+  }
+
+  private saveEditorSessions() {
+    writeJsonFile(EDITOR_SESSIONS_PATH, this.editorSessions);
   }
 
   private savePluginCatalog(catalog: PluginCatalogState) {

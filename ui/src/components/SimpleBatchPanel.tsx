@@ -1,76 +1,32 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
-import type { EngineState, FxChainCandidate, PluginCatalogState } from "../types";
+import type { EngineState, FxChainCandidate } from "../types";
 
 type SimpleBatchPanelProps = {
-  pluginCatalog: PluginCatalogState;
   fxChains: FxChainCandidate[];
   engine: EngineState;
   onPickInputFolder: () => Promise<string>;
   onPickFxChainFile: () => Promise<string[]>;
-  onRun: (input: { pluginName: string; fxChainSourcePath?: string; inputDirectory: string }) => Promise<void>;
+  onRun: (input: { profileName?: string; fxChainSourcePath: string; inputDirectory: string }) => Promise<void>;
 };
 
-function matchesPlugin(candidateName: string, pluginName: string) {
-  const left = candidateName.toLowerCase();
-  const right = pluginName.toLowerCase();
-  return left.includes(right) || right.includes(left);
+function getChainName(filePath: string) {
+  const normalized = filePath.trim().split("/").filter(Boolean).pop() ?? "";
+  return normalized.replace(/\.rfxchain$/i, "").trim();
 }
 
 export function SimpleBatchPanel({
-  pluginCatalog,
   fxChains,
   engine,
   onPickInputFolder,
   onPickFxChainFile,
   onRun,
 }: SimpleBatchPanelProps) {
-  const [pluginQuery, setPluginQuery] = useState("");
-  const [selectedPluginName, setSelectedPluginName] = useState("");
   const [inputDirectory, setInputDirectory] = useState("");
   const [fxChainPath, setFxChainPath] = useState("");
 
-  const filteredPlugins = useMemo(() => {
-    const query = pluginQuery.trim().toLowerCase();
-
-    return pluginCatalog.plugins.filter((plugin) => {
-      if (plugin.instrument) {
-        return false;
-      }
-
-      if (!query) {
-        return true;
-      }
-
-      return `${plugin.name} ${plugin.vendor} ${plugin.format}`.toLowerCase().includes(query);
-    });
-  }, [pluginCatalog.plugins, pluginQuery]);
-
-  const matchingFxChains = useMemo(() => {
-    if (!selectedPluginName) {
-      return fxChains;
-    }
-
-    return fxChains.filter((candidate) => matchesPlugin(candidate.name, selectedPluginName));
-  }, [fxChains, selectedPluginName]);
-
-  useEffect(() => {
-    if (!selectedPluginName && filteredPlugins.length > 0) {
-      setSelectedPluginName(filteredPlugins[0].name);
-    }
-  }, [filteredPlugins, selectedPluginName]);
-
-  useEffect(() => {
-    if (!selectedPluginName || fxChainPath.trim()) {
-      return;
-    }
-
-    const suggestion = matchingFxChains[0];
-
-    if (suggestion) {
-      setFxChainPath(suggestion.path);
-    }
-  }, [fxChainPath, matchingFxChains, selectedPluginName]);
+  const chainName = useMemo(() => getChainName(fxChainPath), [fxChainPath]);
+  const outputPreview = inputDirectory && chainName ? `${inputDirectory}/${chainName}/same-file.wav` : "";
 
   const browseInputFolder = async () => {
     const selectedPath = await onPickInputFolder();
@@ -90,20 +46,18 @@ export function SimpleBatchPanel({
 
   const submit = async () => {
     await onRun({
-      pluginName: selectedPluginName,
-      fxChainSourcePath: fxChainPath.trim() || undefined,
+      profileName: chainName || undefined,
+      fxChainSourcePath: fxChainPath.trim(),
       inputDirectory,
     });
   };
-
-  const outputPreview = inputDirectory && selectedPluginName ? `${inputDirectory}/${selectedPluginName}/same-file.wav` : "";
 
   return (
     <section className="panel panel-simple">
       <div className="panel-heading">
         <div>
           <p className="eyebrow">Simple Mode</p>
-          <h2>{"Folder -> Plugin -> Batch Export"}</h2>
+          <h2>{"Folder -> .RfxChain -> Batch Export"}</h2>
         </div>
         <div className={`badge ${engine.running ? "badge-warn" : "badge-ok"}`}>{engine.running ? "Running" : "Ready"}</div>
       </div>
@@ -124,23 +78,7 @@ export function SimpleBatchPanel({
         </label>
 
         <label>
-          <span>2. Plugin search</span>
-          <input value={pluginQuery} onChange={(event) => setPluginQuery(event.target.value)} placeholder="Ozone 12" />
-        </label>
-
-        <label>
-          <span>Plugin</span>
-          <select value={selectedPluginName} onChange={(event) => setSelectedPluginName(event.target.value)}>
-            {filteredPlugins.map((plugin) => (
-              <option key={plugin.id} value={plugin.name}>
-                {plugin.name} {plugin.vendor ? `(${plugin.vendor})` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label>
-          <span>3. Plugin settings (.RfxChain)</span>
+          <span>2. Settings file (.RfxChain)</span>
           <div className="path-input-row">
             <input
               value={fxChainPath}
@@ -155,11 +93,11 @@ export function SimpleBatchPanel({
       </div>
 
       <div className="candidate-list">
-        <h3>Suggested settings</h3>
-        {matchingFxChains.length === 0 ? (
-          <div className="empty-state">No matching `.RfxChain` files found. Create one in REAPER and choose it.</div>
+        <h3>Detected .RfxChain files</h3>
+        {fxChains.length === 0 ? (
+          <div className="empty-state">No `.RfxChain` files found yet. Create one in REAPER and choose it.</div>
         ) : (
-          matchingFxChains.slice(0, 8).map((candidate) => (
+          fxChains.slice(0, 12).map((candidate) => (
             <button className="candidate-chip" key={candidate.id} onClick={() => setFxChainPath(candidate.path)} type="button">
               {candidate.name}
             </button>
@@ -167,13 +105,14 @@ export function SimpleBatchPanel({
         )}
       </div>
 
+      {chainName ? <p className="field-hint">Output folder: {chainName}</p> : null}
       {outputPreview ? <p className="field-hint">Output preview: {outputPreview}</p> : null}
 
       <div className="simple-actions">
         <button
           className="button button-primary"
           onClick={() => void submit()}
-          disabled={engine.running || !inputDirectory.trim() || !selectedPluginName.trim() || !fxChainPath.trim()}
+          disabled={engine.running || !inputDirectory.trim() || !fxChainPath.trim()}
         >
           Batch export
         </button>
