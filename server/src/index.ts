@@ -79,6 +79,20 @@ app.post("/api/jobs/batch", (request, response) => {
   }
 });
 
+app.post("/api/jobs/folder", (request, response) => {
+  try {
+    const jobs = service.queueFolderJobs(request.body as {
+      profileId: string;
+      inputDirectory: string;
+      outputBaseDirectory?: string;
+      recursive?: boolean;
+    });
+    response.status(201).json(jobs);
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "Could not queue folder jobs." });
+  }
+});
+
 app.post("/api/jobs/:jobId/retry", (request, response) => {
   try {
     const job = service.retryJob(request.params.jobId);
@@ -94,6 +108,45 @@ app.delete("/api/jobs/:jobId", (request, response) => {
     response.status(204).end();
   } catch (error) {
     response.status(400).json({ error: error instanceof Error ? error.message : "Could not remove job." });
+  }
+});
+
+app.post("/api/saved-settings", (request, response) => {
+  try {
+    const settings = service.createSavedSettings(request.body as {
+      name: string;
+      profileId: string;
+      inputDirectory: string;
+      outputBaseDirectory?: string;
+      recursive?: boolean;
+    });
+    response.status(201).json(settings);
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "Could not save settings." });
+  }
+});
+
+app.patch("/api/saved-settings/:settingsId", (request, response) => {
+  try {
+    const settings = service.updateSavedSettings(request.params.settingsId, request.body as {
+      name?: string;
+      profileId?: string;
+      inputDirectory?: string;
+      outputBaseDirectory?: string;
+      recursive?: boolean;
+    });
+    response.json(settings);
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "Could not update settings." });
+  }
+});
+
+app.delete("/api/saved-settings/:settingsId", (request, response) => {
+  try {
+    service.deleteSavedSettings(request.params.settingsId);
+    response.status(204).end();
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "Could not delete settings." });
   }
 });
 

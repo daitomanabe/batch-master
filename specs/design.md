@@ -7,11 +7,14 @@
 - `BatchEngine` processes queued jobs sequentially, tails each REAPER splash log, and persists job updates after every state transition.
 - Imported `.RfxChain` files are copied into the app data directory so profiles remain stable even if the original file moves.
 - Batch queue requests can generate multiple jobs at once from a list of source files plus an optional output directory.
+- Folder queue requests expand a WAV directory into many jobs and map outputs to `<output-base>/<profile-name>/<relative-input-path>`.
+- Saved folder-batch settings are stored alongside profiles and jobs in the app data directory.
 
 ## Frontend
 
 - React renders a single control surface for environment status, render profiles, queue entry, live jobs, and logs.
 - The queue surface supports single-file entry and multi-file batch entry.
+- The queue surface also supports folder scans and saved folder-batch settings.
 - Saved profiles are editable in place so `.RfxChain` paths and notes can be updated without recreating the profile.
 - Initial state is fetched from `/api/bootstrap`.
 - Live updates arrive through Server-Sent Events and are also backed by explicit refresh endpoints.

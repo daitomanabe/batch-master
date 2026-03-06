@@ -10,17 +10,21 @@ import {
   addBatchJobs,
   cancelBatch,
   clearFinishedJobs,
+  createSavedSettings,
   createProfile,
+  deleteSavedSettings,
   deleteProfile,
   fetchBootstrap,
+  queueFolderJobs,
   refreshEnvironment,
   removeJob,
   retryJob,
   startBatch,
   subscribeToEvents,
+  updateSavedSettings,
   updateProfile,
 } from "./lib/api";
-import type { BatchJob, EngineState, FxChainCandidate, ReaperInfo, RenderProfile, StatePayload } from "./types";
+import type { BatchJob, EngineState, FxChainCandidate, ReaperInfo, RenderProfile, SavedBatchSettings, StatePayload } from "./types";
 
 const emptyEngine: EngineState = {
   running: false,
@@ -46,12 +50,14 @@ const emptyReaper: ReaperInfo = {
 function applyStatePayload(
   payload: StatePayload,
   setProfiles: (value: RenderProfile[]) => void,
+  setSavedSettings: (value: SavedBatchSettings[]) => void,
   setJobs: (value: BatchJob[]) => void,
   setEngine: (value: EngineState) => void,
   setReaper: (value: ReaperInfo) => void,
   setFxChains: (value: FxChainCandidate[]) => void,
 ) {
   setProfiles(payload.profiles);
+  setSavedSettings(payload.savedSettings);
   setJobs(payload.jobs);
   setEngine(payload.engine);
   setReaper(payload.reaper);
@@ -61,6 +67,7 @@ function applyStatePayload(
 export default function App() {
   const [profiles, setProfiles] = useState<RenderProfile[]>([]);
   const [jobs, setJobs] = useState<BatchJob[]>([]);
+  const [savedSettings, setSavedSettings] = useState<SavedBatchSettings[]>([]);
   const [engine, setEngine] = useState<EngineState>(emptyEngine);
   const [reaper, setReaper] = useState<ReaperInfo>(emptyReaper);
   const [fxChains, setFxChains] = useState<FxChainCandidate[]>([]);
@@ -72,6 +79,7 @@ export default function App() {
   const loadBootstrap = async () => {
     const payload = await fetchBootstrap();
     setProfiles(payload.profiles);
+    setSavedSettings(payload.savedSettings);
     setJobs(payload.jobs);
     setEngine(payload.engine);
     setReaper(payload.reaper);
@@ -88,7 +96,7 @@ export default function App() {
     const unsubscribe = subscribeToEvents({
       onState: (payload) => {
         setStreamConnected(true);
-        applyStatePayload(payload, setProfiles, setJobs, setEngine, setReaper, setFxChains);
+        applyStatePayload(payload, setProfiles, setSavedSettings, setJobs, setEngine, setReaper, setFxChains);
       },
       onLogs: (snapshot) => {
         setStreamConnected(true);
@@ -155,9 +163,18 @@ export default function App() {
         />
         <QueuePanel
           profiles={profiles}
+          savedSettings={savedSettings}
           engine={engine}
           onAddJob={(input) => runAction("Job queued.", async () => void (await addJob(input)))}
           onAddBatchJobs={(input) => runAction("Batch jobs queued.", async () => void (await addBatchJobs(input)))}
+          onQueueFolder={(input) => runAction("Folder queued.", async () => void (await queueFolderJobs(input)))}
+          onCreateSavedSettings={(input) => runAction(`Settings saved: ${input.name}`, async () => void (await createSavedSettings(input)))}
+          onUpdateSavedSettings={(settingsId, input) =>
+            runAction("Settings updated.", async () => void (await updateSavedSettings(settingsId, input)))
+          }
+          onDeleteSavedSettings={(settingsId) =>
+            runAction("Settings deleted.", async () => void (await deleteSavedSettings(settingsId)))
+          }
           onStart={() => runAction("Batch started.", async () => void (await startBatch()))}
           onCancel={() => runAction("Batch cancellation requested.", async () => void (await cancelBatch()))}
         />

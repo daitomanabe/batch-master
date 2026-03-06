@@ -10,6 +10,17 @@ export type RenderProfile = {
   updatedAt: string;
 };
 
+export type SavedBatchSettings = {
+  id: string;
+  name: string;
+  profileId: string;
+  inputDirectory: string;
+  outputBaseDirectory: string;
+  recursive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type BatchJob = {
   id: string;
   profileId: string;
@@ -56,6 +67,7 @@ export type FxChainCandidate = {
 
 export type BootstrapPayload = {
   profiles: RenderProfile[];
+  savedSettings: SavedBatchSettings[];
   jobs: BatchJob[];
   engine: EngineState;
   logs: string[];

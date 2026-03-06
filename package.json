@@ -4,9 +4,11 @@
   "version": "1.0.0",
   "scripts": {
     "install:all": "npm --prefix server install && npm --prefix ui install",
+    "dev": "./scripts/dev-batchmaster.sh",
     "dev:server": "npm --prefix server run dev",
     "dev:ui": "npm --prefix ui run dev",
     "build": "npm --prefix server run build && npm --prefix ui run build",
-    "start": "npm --prefix server run start"
+    "start": "npm --prefix server run start",
+    "launch": "./scripts/start-batchmaster.sh"
   }
 }

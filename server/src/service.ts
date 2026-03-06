@@ -13,6 +13,7 @@ import type {
   FxChainCandidate,
   ReaperInfo,
   RenderProfile,
+  SavedBatchSettings,
   StateEventPayload,
 } from "./types.js";
 
@@ -43,6 +44,29 @@ type BatchJobInput = {
   outputDirectory?: string;
 };
 
+type FolderJobInput = {
+  profileId: string;
+  inputDirectory: string;
+  outputBaseDirectory?: string;
+  recursive?: boolean;
+};
+
+type SavedSettingsInput = {
+  name: string;
+  profileId: string;
+  inputDirectory: string;
+  outputBaseDirectory?: string;
+  recursive?: boolean;
+};
+
+type SavedSettingsUpdateInput = {
+  name?: string;
+  profileId?: string;
+  inputDirectory?: string;
+  outputBaseDirectory?: string;
+  recursive?: boolean;
+};
+
 const REAPER_BINARY = process.env.BM_REAPER_PATH ?? "/Applications/REAPER.app/Contents/MacOS/REAPER";
 const REAPER_RESOURCE_DIR = path.join(os.homedir(), "Library/Application Support/REAPER");
 const APP_DATA_DIR = path.join(os.homedir(), "Library/Application Support/BatchMaster");
@@ -50,6 +74,7 @@ const MANAGED_FXCHAINS_DIR = path.join(APP_DATA_DIR, "fxchains");
 const RUNS_DIR = path.join(APP_DATA_DIR, "runs");
 const LOGS_DIR = path.join(APP_DATA_DIR, "logs");
 const PROFILES_PATH = path.join(APP_DATA_DIR, "profiles.json");
+const SAVED_SETTINGS_PATH = path.join(APP_DATA_DIR, "saved-settings.json");
 const JOBS_PATH = path.join(APP_DATA_DIR, "jobs.json");
 const ENGINE_LOG_PATH = path.join(LOGS_DIR, "engine.log");
 
@@ -102,12 +127,61 @@ function writeJsonFile(filePath: string, value: unknown) {
   writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-function buildOutputPathForInput(inputPath: string, profileName: string, outputDirectory?: string) {
+function sanitizePathSegment(value: string) {
+  const sanitized = value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").trim().replace(/\s+/g, " ");
+  return sanitized || "Render";
+}
+
+function isWavFile(filePath: string) {
+  const extension = path.extname(filePath).toLowerCase();
+  return extension === ".wav" || extension === ".wave";
+}
+
+function collectWavFiles(directory: string, recursive: boolean, excludedDirectories: Set<string> = new Set()) {
+  const resolvedRoot = path.resolve(directory);
+  const stack = [resolvedRoot];
+  const files: string[] = [];
+
+  while (stack.length > 0) {
+    const current = stack.pop() as string;
+    const dirEntries = readdirSync(current, { withFileTypes: true });
+
+    for (const entry of dirEntries) {
+      const absolutePath = path.join(current, entry.name);
+      const resolvedPath = path.resolve(absolutePath);
+
+      if (entry.isDirectory()) {
+        if (!recursive && current === resolvedRoot) {
+          continue;
+        }
+
+        if (recursive && !excludedDirectories.has(resolvedPath)) {
+          stack.push(resolvedPath);
+        }
+
+        continue;
+      }
+
+      if (entry.isFile() && isWavFile(resolvedPath)) {
+        files.push(resolvedPath);
+      }
+    }
+  }
+
+  return files.sort((left, right) => left.localeCompare(right));
+}
+
+function buildOutputPathForInput(
+  inputPath: string,
+  profileName: string,
+  options?: { outputBaseDirectory?: string; inputRootDirectory?: string },
+) {
   const parsed = path.parse(inputPath);
-  const directory = outputDirectory?.trim() || parsed.dir;
-  const extension = parsed.ext || ".wav";
-  const baseName = `${parsed.name}--${slugify(profileName) || "render"}${extension}`;
-  return path.join(directory, baseName);
+  const profileDirectoryName = sanitizePathSegment(profileName);
+  const outputRoot = options?.outputBaseDirectory?.trim() || options?.inputRootDirectory || parsed.dir;
+  const relativePath = options?.inputRootDirectory ? path.relative(options.inputRootDirectory, inputPath) : parsed.base;
+  const safeRelativePath = relativePath && !relativePath.startsWith("..") ? relativePath : parsed.base;
+  return path.join(outputRoot, profileDirectoryName, safeRelativePath);
 }
 
 function ensureUniqueOutputPath(outputPath: string, usedPaths: Set<string>) {
@@ -135,6 +209,7 @@ export class BatchMasterService {
   private readonly events = new EventStream();
   private reaperInfo: ReaperInfo;
   private profiles: RenderProfile[];
+  private savedSettings: SavedBatchSettings[];
   private jobs: BatchJob[];
   private logs: string[];
   private engine = { ...EMPTY_ENGINE_STATE };
@@ -150,6 +225,7 @@ export class BatchMasterService {
 
     this.reaperInfo = this.detectReaper();
     this.profiles = readJsonFile<RenderProfile[]>(PROFILES_PATH, []);
+    this.savedSettings = readJsonFile<SavedBatchSettings[]>(SAVED_SETTINGS_PATH, []);
     this.jobs = readJsonFile<BatchJob[]>(JOBS_PATH, []).map((job) => ({
       ...job,
       progress: job.status === "done" ? 1 : job.status === "processing" ? 0 : job.progress ?? 0,
@@ -185,6 +261,7 @@ export class BatchMasterService {
   getBootstrap(): BootstrapPayload {
     return {
       profiles: this.profiles,
+      savedSettings: this.savedSettings,
       jobs: this.jobs,
       engine: this.engine,
       logs: this.logs,
@@ -196,6 +273,7 @@ export class BatchMasterService {
   getStatePayload(): StateEventPayload {
     return {
       profiles: this.profiles,
+      savedSettings: this.savedSettings,
       jobs: this.jobs,
       engine: this.engine,
       reaper: this.reaperInfo,
@@ -395,7 +473,9 @@ export class BatchMasterService {
     }
 
     this.profiles = this.profiles.filter((profile) => profile.id !== profileId);
+    this.savedSettings = this.savedSettings.filter((settings) => settings.profileId !== profileId);
     this.saveProfiles();
+    this.saveSavedSettings();
     this.log(`Profile deleted: ${target.name}`);
     this.emitState();
   }
@@ -469,7 +549,7 @@ export class BatchMasterService {
     const usedOutputs = new Set<string>();
     const jobs = normalizedInputs.map((inputPath) => {
       const outputPath = ensureUniqueOutputPath(
-        buildOutputPathForInput(inputPath, profile.name, outputDirectory),
+        buildOutputPathForInput(inputPath, profile.name, { outputBaseDirectory: outputDirectory || undefined }),
         usedOutputs,
       );
 
@@ -482,6 +562,126 @@ export class BatchMasterService {
 
     this.log(`Queued ${jobs.length} jobs in batch for profile ${profile.name}.`);
     return jobs;
+  }
+
+  queueFolderJobs(input: FolderJobInput) {
+    const profile = this.profiles.find((entry) => entry.id === input.profileId);
+    const inputDirectory = input.inputDirectory.trim();
+    const outputBaseDirectory = input.outputBaseDirectory?.trim() ?? "";
+    const recursive = input.recursive ?? false;
+
+    if (!profile) {
+      throw new Error("Profile not found.");
+    }
+
+    if (!inputDirectory) {
+      throw new Error("Input folder is required.");
+    }
+
+    if (!path.isAbsolute(inputDirectory)) {
+      throw new Error("Input folder must be an absolute path.");
+    }
+
+    if (!existsSync(inputDirectory) || !statSync(inputDirectory).isDirectory()) {
+      throw new Error("Input folder does not exist.");
+    }
+
+    if (outputBaseDirectory && !path.isAbsolute(outputBaseDirectory)) {
+      throw new Error("Output base folder must be an absolute path.");
+    }
+
+    const resolvedInputDirectory = path.resolve(inputDirectory);
+    const resolvedOutputBaseDirectory = outputBaseDirectory ? path.resolve(outputBaseDirectory) : "";
+    const profileOutputRoot = path.resolve(resolvedOutputBaseDirectory || resolvedInputDirectory, sanitizePathSegment(profile.name));
+    const excludedDirectories = new Set<string>();
+
+    if (profileOutputRoot === resolvedInputDirectory || profileOutputRoot.startsWith(`${resolvedInputDirectory}${path.sep}`)) {
+      excludedDirectories.add(profileOutputRoot);
+    }
+
+    const wavFiles = collectWavFiles(resolvedInputDirectory, recursive, excludedDirectories);
+
+    if (wavFiles.length === 0) {
+      throw new Error("No WAV files were found in the input folder.");
+    }
+
+    const usedOutputs = new Set<string>();
+    const jobs = wavFiles.map((inputPath) => {
+      const outputPath = ensureUniqueOutputPath(
+        buildOutputPathForInput(inputPath, profile.name, {
+          outputBaseDirectory: resolvedOutputBaseDirectory || undefined,
+          inputRootDirectory: resolvedInputDirectory,
+        }),
+        usedOutputs,
+      );
+
+      return this.addJob({
+        profileId: profile.id,
+        inputPath,
+        outputPath,
+      });
+    });
+
+    this.log(`Queued ${jobs.length} folder jobs from ${resolvedInputDirectory} using profile ${profile.name}.`);
+    return jobs;
+  }
+
+  createSavedSettings(input: SavedSettingsInput) {
+    const normalized = this.normalizeSavedSettingsInput(input);
+    const createdAt = nowIso();
+    const savedSettings: SavedBatchSettings = {
+      id: randomUUID(),
+      ...normalized,
+      createdAt,
+      updatedAt: createdAt,
+    };
+
+    this.savedSettings = [savedSettings, ...this.savedSettings];
+    this.saveSavedSettings();
+    this.log(`Saved settings created: ${savedSettings.name}`);
+    this.emitState();
+    return savedSettings;
+  }
+
+  updateSavedSettings(settingsId: string, input: SavedSettingsUpdateInput) {
+    const target = this.savedSettings.find((settings) => settings.id === settingsId);
+
+    if (!target) {
+      throw new Error("Saved settings not found.");
+    }
+
+    const normalized = this.normalizeSavedSettingsInput({
+      name: input.name ?? target.name,
+      profileId: input.profileId ?? target.profileId,
+      inputDirectory: input.inputDirectory ?? target.inputDirectory,
+      outputBaseDirectory: input.outputBaseDirectory ?? target.outputBaseDirectory,
+      recursive: input.recursive ?? target.recursive,
+    });
+
+    const updated: SavedBatchSettings = {
+      ...target,
+      ...normalized,
+      updatedAt: nowIso(),
+    };
+
+    this.savedSettings = this.savedSettings.map((settings) => (settings.id === settingsId ? updated : settings));
+    this.saveSavedSettings();
+    this.log(`Saved settings updated: ${updated.name}`);
+    this.emitState();
+    return updated;
+  }
+
+  deleteSavedSettings(settingsId: string) {
+    const target = this.savedSettings.find((settings) => settings.id === settingsId);
+
+    if (!target) {
+      throw new Error("Saved settings not found.");
+    }
+
+    this.savedSettings = this.savedSettings.filter((settings) => settings.id !== settingsId);
+    this.saveSavedSettings();
+    this.log(`Saved settings deleted: ${target.name}`);
+    this.emitState();
   }
 
   clearFinishedJobs() {
@@ -879,6 +1079,10 @@ export class BatchMasterService {
     writeJsonFile(PROFILES_PATH, this.profiles);
   }
 
+  private saveSavedSettings() {
+    writeJsonFile(SAVED_SETTINGS_PATH, this.savedSettings);
+  }
+
   private saveJobs() {
     writeJsonFile(JOBS_PATH, this.jobs);
   }
@@ -929,6 +1133,41 @@ export class BatchMasterService {
       fxChainsDir: path.join(REAPER_RESOURCE_DIR, "FXChains"),
       appDataDir: APP_DATA_DIR,
       version,
+    };
+  }
+
+  private normalizeSavedSettingsInput(input: SavedSettingsInput) {
+    const profile = this.profiles.find((entry) => entry.id === input.profileId);
+    const name = input.name.trim();
+    const inputDirectory = input.inputDirectory.trim();
+    const outputBaseDirectory = input.outputBaseDirectory?.trim() ?? "";
+
+    if (!profile) {
+      throw new Error("Profile not found.");
+    }
+
+    if (!name) {
+      throw new Error("Settings name is required.");
+    }
+
+    if (!inputDirectory) {
+      throw new Error("Input folder is required.");
+    }
+
+    if (!path.isAbsolute(inputDirectory)) {
+      throw new Error("Input folder must be an absolute path.");
+    }
+
+    if (outputBaseDirectory && !path.isAbsolute(outputBaseDirectory)) {
+      throw new Error("Output base folder must be an absolute path.");
+    }
+
+    return {
+      name,
+      profileId: profile.id,
+      inputDirectory,
+      outputBaseDirectory,
+      recursive: input.recursive ?? false,
     };
   }
 }

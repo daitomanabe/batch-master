@@ -1,4 +1,4 @@
-import type { BootstrapPayload, RenderProfile, StatePayload } from "../types";
+import type { BootstrapPayload, RenderProfile, SavedBatchSettings, StatePayload } from "../types";
 
 type CreateProfileInput = {
   name: string;
@@ -17,6 +17,21 @@ type AddBatchJobsInput = {
   profileId: string;
   inputPaths: string[];
   outputDirectory?: string;
+};
+
+type QueueFolderJobsInput = {
+  profileId: string;
+  inputDirectory: string;
+  outputBaseDirectory?: string;
+  recursive?: boolean;
+};
+
+type SavedSettingsInput = {
+  name: string;
+  profileId: string;
+  inputDirectory: string;
+  outputBaseDirectory?: string;
+  recursive?: boolean;
 };
 
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
@@ -89,6 +104,13 @@ export async function addBatchJobs(input: AddBatchJobsInput) {
   });
 }
 
+export async function queueFolderJobs(input: QueueFolderJobsInput) {
+  return request("/api/jobs/folder", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export async function retryJob(jobId: string) {
   return request(`/api/jobs/${jobId}/retry`, {
     method: "POST",
@@ -103,6 +125,26 @@ export async function removeJob(jobId: string) {
 
 export async function clearFinishedJobs() {
   return request<void>("/api/jobs/clear-finished", { method: "POST" });
+}
+
+export async function createSavedSettings(input: SavedSettingsInput) {
+  return request<SavedBatchSettings>("/api/saved-settings", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateSavedSettings(settingsId: string, input: Partial<SavedSettingsInput>) {
+  return request<SavedBatchSettings>(`/api/saved-settings/${settingsId}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteSavedSettings(settingsId: string) {
+  return request<void>(`/api/saved-settings/${settingsId}`, {
+    method: "DELETE",
+  });
 }
 
 export async function startBatch() {
