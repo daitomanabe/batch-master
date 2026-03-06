@@ -15,6 +15,26 @@ function getChainName(filePath: string) {
   return normalized.replace(/\.rfxchain$/i, "").trim();
 }
 
+function getParentDirectory(directoryPath: string) {
+  const normalized = directoryPath.trim();
+
+  if (!normalized) {
+    return "";
+  }
+
+  const parts = normalized.split("/").filter(Boolean);
+
+  if (normalized.startsWith("/")) {
+    if (parts.length <= 1) {
+      return "/";
+    }
+
+    return `/${parts.slice(0, -1).join("/")}`;
+  }
+
+  return parts.slice(0, -1).join("/");
+}
+
 export function SimpleBatchPanel({
   fxChains,
   engine,
@@ -26,7 +46,10 @@ export function SimpleBatchPanel({
   const [fxChainPath, setFxChainPath] = useState("");
 
   const chainName = useMemo(() => getChainName(fxChainPath), [fxChainPath]);
-  const outputPreview = inputDirectory && chainName ? `${inputDirectory}/${chainName}/same-file.wav` : "";
+  const outputBaseDirectory = useMemo(() => getParentDirectory(inputDirectory), [inputDirectory]);
+  const outputFolderNamePreview = chainName ? `${chainName}-rYYYYMMDDHHMM` : "";
+  const outputPreview =
+    outputBaseDirectory && outputFolderNamePreview ? `${outputBaseDirectory}/${outputFolderNamePreview}/same-file.wav` : "";
 
   const browseInputFolder = async () => {
     const selectedPath = await onPickInputFolder();
@@ -105,7 +128,7 @@ export function SimpleBatchPanel({
         )}
       </div>
 
-      {chainName ? <p className="field-hint">Output folder: {chainName}</p> : null}
+      {outputFolderNamePreview ? <p className="field-hint">Output folder: {outputFolderNamePreview}</p> : null}
       {outputPreview ? <p className="field-hint">Output preview: {outputPreview}</p> : null}
 
       <div className="simple-actions">

@@ -51,6 +51,7 @@ type FolderJobInput = {
   profileId: string;
   inputDirectory: string;
   outputBaseDirectory?: string;
+  outputFolderName?: string;
   recursive?: boolean;
 };
 
@@ -119,6 +120,22 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function formatRenderTimestamp(date: Date) {
+  const pad = (value: number) => value.toString().padStart(2, "0");
+
+  return [
+    date.getFullYear().toString(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+  ].join("");
+}
+
+function buildRenderFolderName(baseName: string, date: Date) {
+  return `${sanitizePathSegment(baseName)}-r${formatRenderTimestamp(date)}`;
+}
+
 function slugify(value: string) {
   const slug = value
     .toLowerCase()
@@ -162,7 +179,12 @@ function isWavFile(filePath: string) {
   return extension === ".wav" || extension === ".wave";
 }
 
-function collectWavFiles(directory: string, recursive: boolean, excludedDirectories: Set<string> = new Set()) {
+function collectWavFiles(
+  directory: string,
+  recursive: boolean,
+  excludedDirectories: Set<string> = new Set(),
+  excludedDirectoryNamePrefixes: string[] = [],
+) {
   const resolvedRoot = path.resolve(directory);
   const stack = [resolvedRoot];
   const files: string[] = [];
@@ -176,11 +198,17 @@ function collectWavFiles(directory: string, recursive: boolean, excludedDirector
       const resolvedPath = path.resolve(absolutePath);
 
       if (entry.isDirectory()) {
+        const normalizedEntryName = sanitizePathSegment(entry.name);
+
         if (!recursive && current === resolvedRoot) {
           continue;
         }
 
-        if (recursive && !excludedDirectories.has(resolvedPath)) {
+        if (
+          recursive &&
+          !excludedDirectories.has(resolvedPath) &&
+          !excludedDirectoryNamePrefixes.some((prefix) => normalizedEntryName === prefix || normalizedEntryName.startsWith(`${prefix}-r`))
+        ) {
           stack.push(resolvedPath);
         }
 
@@ -883,6 +911,7 @@ export class BatchMasterService {
     const profile = this.profiles.find((entry) => entry.id === input.profileId);
     const inputDirectory = input.inputDirectory.trim();
     const outputBaseDirectory = input.outputBaseDirectory?.trim() ?? "";
+    const outputFolderName = input.outputFolderName?.trim() || profile?.name || "";
     const recursive = input.recursive ?? false;
 
     if (!profile) {
@@ -905,16 +934,25 @@ export class BatchMasterService {
       throw new Error("Output base folder must be an absolute path.");
     }
 
+    if (!outputFolderName) {
+      throw new Error("Output folder name is required.");
+    }
+
     const resolvedInputDirectory = path.resolve(inputDirectory);
     const resolvedOutputBaseDirectory = outputBaseDirectory ? path.resolve(outputBaseDirectory) : "";
-    const profileOutputRoot = path.resolve(resolvedOutputBaseDirectory || resolvedInputDirectory, sanitizePathSegment(profile.name));
+    const sanitizedOutputFolderName = sanitizePathSegment(outputFolderName);
+    const sanitizedProfileName = sanitizePathSegment(profile.name);
+    const profileOutputRoot = path.resolve(resolvedOutputBaseDirectory || resolvedInputDirectory, sanitizedOutputFolderName);
     const excludedDirectories = new Set<string>();
 
     if (profileOutputRoot === resolvedInputDirectory || profileOutputRoot.startsWith(`${resolvedInputDirectory}${path.sep}`)) {
       excludedDirectories.add(profileOutputRoot);
     }
 
-    const wavFiles = collectWavFiles(resolvedInputDirectory, recursive, excludedDirectories);
+    const wavFiles = collectWavFiles(resolvedInputDirectory, recursive, excludedDirectories, [
+      sanitizedProfileName,
+      sanitizedOutputFolderName,
+    ]);
 
     if (wavFiles.length === 0) {
       throw new Error("No WAV files were found in the input folder.");
@@ -923,7 +961,7 @@ export class BatchMasterService {
     const usedOutputs = new Set<string>();
     const jobs = wavFiles.map((inputPath) => {
       const outputPath = ensureUniqueOutputPath(
-        buildOutputPathForInput(inputPath, profile.name, {
+        buildOutputPathForInput(inputPath, outputFolderName, {
           outputBaseDirectory: resolvedOutputBaseDirectory || undefined,
           inputRootDirectory: resolvedInputDirectory,
         }),
@@ -937,7 +975,7 @@ export class BatchMasterService {
       });
     });
 
-    this.log(`Queued ${jobs.length} folder jobs from ${resolvedInputDirectory} using profile ${profile.name}.`);
+    this.log(`Queued ${jobs.length} folder jobs from ${resolvedInputDirectory} into ${profileOutputRoot}.`);
     return jobs;
   }
 
@@ -1010,6 +1048,7 @@ export class BatchMasterService {
       ? path.basename(fxChainSourcePath, path.extname(fxChainSourcePath)).trim()
       : "";
     const profileName = input.profileName?.trim() || derivedProfileName;
+    const outputFolderName = profileName ? buildRenderFolderName(profileName, new Date()) : "";
 
     if (!inputDirectory) {
       throw new Error("Input folder is required.");
@@ -1050,6 +1089,8 @@ export class BatchMasterService {
     const queuedJobs = this.queueFolderJobs({
       profileId: profile.id,
       inputDirectory,
+      outputBaseDirectory: path.dirname(path.resolve(inputDirectory)),
+      outputFolderName,
       recursive: input.recursive ?? true,
     });
 
