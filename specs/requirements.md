@@ -2,20 +2,20 @@
 
 ## Product Goal
 
-BatchMaster is a standalone desktop app for chaining VST3/AU plugins and rendering multiple audio files offline.
+BatchMaster is a local batch renderer that delegates offline FX processing to REAPER instead of hosting VSTs directly.
 
 ## Functional Requirements
 
-- Scan `/Library/Audio/Plug-Ins/VST3` and cache discovered VST3 plugins.
-- Build a chain of enabled plugins with optional built-in preset selection and optional `.vstpreset` file reference.
-- Save and reload chains as `.bmchain.json` files in the user application support directory.
-- Queue multiple offline render jobs with independent input and output paths.
-- Render queued jobs sequentially on a background thread and surface progress to the WebView UI.
-- Expose the documented JS bridge methods and push `progress.update` / `batch.done` events to the frontend.
+- Detect the installed REAPER binary at `/Applications/REAPER.app/Contents/MacOS/REAPER`.
+- Persist reusable render profiles that reference `.RfxChain` files or a dry pass-through mode.
+- Queue multiple offline jobs with independent input and output paths.
+- Execute jobs sequentially via REAPER `-batchconvert`.
+- Persist profiles, queue state, engine state, and log files under `~/Library/Application Support/BatchMaster`.
+- Surface REAPER splash log output and engine log output in a debug console UI.
 
 ## Non-Functional Requirements
 
-- The app must remain responsive while batch rendering runs.
-- The UI must also work in browser-only development mode with a mock backend.
-- The implementation should degrade gracefully when a plugin cannot be instantiated or a preset file cannot be applied.
-- The render path should default to WAV output at the source sample rate and 32-bit depth.
+- Jobs must survive app restarts while not running.
+- The UI must remain responsive while REAPER is processing.
+- A user must be able to diagnose failures from the UI without attaching a debugger.
+- The system should prefer deterministic file-based orchestration over in-process plugin hosting.

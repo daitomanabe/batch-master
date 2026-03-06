@@ -63,4 +63,4 @@ export type BootstrapPayload = {
   fxChains: FxChainCandidate[];
 };
 
-export type StatePayload = Omit<BootstrapPayload, "logs">;
+export type StateEventPayload = Omit<BootstrapPayload, "logs">;

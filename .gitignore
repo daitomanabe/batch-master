@@ -1,4 +1,6 @@
 build/
+server/dist/
+server/node_modules/
 ui/node_modules/
 ui/dist/
 *.tsbuildinfo
