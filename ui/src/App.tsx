@@ -8,6 +8,8 @@ import { useBatchProgress } from "./hooks/useBatchProgress";
 import { useJUCEBridge } from "./hooks/useJUCEBridge";
 import type { ChainItem, Plugin, SavedChain } from "./types";
 
+const VST_SCAN_PATH = "/Library/Audio/Plug-Ins/VST3";
+
 function remapChain(chain: ChainItem[]) {
   return chain.map((item, index) => ({
     ...item,
@@ -27,15 +29,18 @@ export default function App() {
   const [savedChains, setSavedChains] = useState<SavedChain[]>([]);
   const [chain, setChain] = useState<ChainItem[]>([]);
   const [presetCatalog, setPresetCatalog] = useState<Record<string, string[]>>({});
-  const [scanPath, setScanPath] = useState("");
   const [filter, setFilter] = useState("");
   const [status, setStatus] = useState("Ready.");
 
   useEffect(() => {
     void (async () => {
-      const [initialPlugins, initialChains] = await Promise.all([backend.getPluginList(), backend.getSavedChains()]);
+      const [initialPlugins, initialChains] = await Promise.all([
+        backend.scanPlugins(VST_SCAN_PATH),
+        backend.getSavedChains(),
+      ]);
       setPlugins(initialPlugins);
       setSavedChains(initialChains);
+      setStatus(`Scanned ${initialPlugins.length} plugins from ${VST_SCAN_PATH}.`);
     })();
   }, [backend]);
 
@@ -70,11 +75,11 @@ export default function App() {
 
   const handleScan = async () => {
     setStatus("Scanning plugins...");
-    const nextPlugins = await backend.scanPlugins(scanPath.trim());
+    const nextPlugins = await backend.scanPlugins(VST_SCAN_PATH);
     startTransition(() => {
       setPlugins(nextPlugins);
     });
-    setStatus(`Scan complete: ${nextPlugins.length} plugins.`);
+    setStatus(`Scan complete: ${nextPlugins.length} plugins from ${VST_SCAN_PATH}.`);
   };
 
   const handleAddPlugin = async (plugin: Plugin) => {
@@ -233,9 +238,8 @@ export default function App() {
       <section className="dashboard">
         <PluginLibrary
           plugins={plugins}
-          scanPath={scanPath}
+          scanPath={VST_SCAN_PATH}
           filter={filter}
-          onScanPathChange={setScanPath}
           onFilterChange={setFilter}
           onScan={handleScan}
           onAdd={handleAddPlugin}

@@ -6,7 +6,6 @@ type PluginLibraryProps = {
   plugins: Plugin[];
   scanPath: string;
   filter: string;
-  onScanPathChange: (value: string) => void;
   onFilterChange: (value: string) => void;
   onScan: () => void;
   onAdd: (plugin: Plugin) => void;
@@ -16,7 +15,6 @@ export function PluginLibrary({
   plugins,
   scanPath,
   filter,
-  onScanPathChange,
   onFilterChange,
   onScan,
   onAdd,
@@ -42,12 +40,11 @@ export function PluginLibrary({
 
       <div className="stack">
         <label>
-          <span>Folder path</span>
+          <span>VST folder path</span>
           <input
             type="text"
-            placeholder="/Library/Audio/Plug-Ins/VST3"
             value={scanPath}
-            onChange={(event) => onScanPathChange(event.target.value)}
+            readOnly
           />
         </label>
 
@@ -64,7 +61,7 @@ export function PluginLibrary({
 
       <div className="library-list">
         {filteredPlugins.length === 0 ? (
-          <div className="empty-state">No plugins yet. Scan a folder or use the default system paths.</div>
+          <div className="empty-state">No plugins found yet. BatchMaster scans only /Library/Audio/Plug-Ins/VST3.</div>
         ) : (
           filteredPlugins.map((plugin) => (
             <article className="library-card" key={plugin.id}>

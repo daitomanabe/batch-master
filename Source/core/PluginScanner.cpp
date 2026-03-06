@@ -2,6 +2,17 @@
 
 namespace batchmaster
 {
+juce::String PluginScanner::getFixedScanRoot()
+{
+   #if JUCE_MAC
+    return "/Library/Audio/Plug-Ins/VST3";
+   #elif JUCE_WINDOWS
+    return "C:\\Program Files\\Common Files\\VST3";
+   #else
+    return {};
+   #endif
+}
+
 PluginScanner::PluginScanner()
 {
    #if JUCE_PLUGINHOST_VST3
@@ -19,11 +30,8 @@ juce::Array<PluginInfo> PluginScanner::scanPlugins(const juce::String& folderPat
     std::set<juce::String> seenPaths;
 
     juce::Array<juce::File> roots;
-
-    if (folderPath.isNotEmpty())
-        roots.add(juce::File(folderPath));
-    else
-        roots = getDefaultSearchRoots();
+    juce::ignoreUnused(folderPath);
+    roots = getDefaultSearchRoots();
 
     for (const auto& root : roots)
         scanRoot(root, discovered, seenPaths);
@@ -97,17 +105,10 @@ std::unique_ptr<juce::AudioPluginInstance> PluginScanner::createPluginInstance(c
 juce::Array<juce::File> PluginScanner::getDefaultSearchRoots() const
 {
     juce::Array<juce::File> roots;
-    const auto userHome = juce::File::getSpecialLocation(juce::File::userHomeDirectory);
+    const auto fixedRoot = getFixedScanRoot();
 
-   #if JUCE_MAC
-    roots.add(juce::File("/Library/Audio/Plug-Ins/VST3"));
-    roots.add(juce::File("/Library/Audio/Plug-Ins/Components"));
-    roots.add(userHome.getChildFile("Library/Audio/Plug-Ins/VST3"));
-    roots.add(userHome.getChildFile("Library/Audio/Plug-Ins/Components"));
-   #elif JUCE_WINDOWS
-    roots.add(juce::File("C:\\Program Files\\Common Files\\VST3"));
-    roots.add(juce::File("C:\\Program Files\\Common Files\\Avid\\Audio\\Plug-Ins"));
-   #endif
+    if (fixedRoot.isNotEmpty())
+        roots.add(juce::File(fixedRoot));
 
     return roots;
 }
@@ -170,7 +171,7 @@ bool PluginScanner::isPluginCandidate(const juce::File& file) const
     const auto path = file.getFullPathName();
 
    #if JUCE_MAC
-    return path.endsWithIgnoreCase(".vst3") || path.endsWithIgnoreCase(".component");
+    return path.endsWithIgnoreCase(".vst3");
    #else
     return path.endsWithIgnoreCase(".vst3");
    #endif

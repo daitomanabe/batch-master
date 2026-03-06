@@ -11,6 +11,8 @@ namespace batchmaster
 class PluginScanner
 {
 public:
+    static juce::String getFixedScanRoot();
+
     PluginScanner();
 
     juce::Array<PluginInfo> scanPlugins(const juce::String& folderPath);

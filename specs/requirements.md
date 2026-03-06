@@ -6,7 +6,7 @@ BatchMaster is a standalone desktop app for chaining VST3/AU plugins and renderi
 
 ## Functional Requirements
 
-- Scan one folder or the default system plugin locations and cache discovered VST3/AU plugins.
+- Scan `/Library/Audio/Plug-Ins/VST3` and cache discovered VST3 plugins.
 - Build a chain of enabled plugins with optional built-in preset selection and optional `.vstpreset` file reference.
 - Save and reload chains as `.bmchain.json` files in the user application support directory.
 - Queue multiple offline render jobs with independent input and output paths.
