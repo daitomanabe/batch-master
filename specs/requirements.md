@@ -13,9 +13,11 @@ BatchMaster is a local batch renderer that delegates offline FX processing to RE
 - Allow multiple input files to be queued in a single batch action.
 - Allow a folder of WAV files to be queued in one action, with optional recursive scan.
 - Preserve the original file names and render into a folder named after the selected profile.
+- Allow file and folder paths to be chosen from native dialogs instead of manual path entry.
 - Execute jobs sequentially via REAPER `-batchconvert`.
 - Persist profiles, queue state, engine state, and log files under `~/Library/Application Support/BatchMaster`.
 - Persist reusable folder-batch settings and allow them to be reloaded from the UI.
+- Read the REAPER plugin catalog on first launch and cache it for subsequent launches.
 - Surface REAPER splash log output and engine log output in a debug console UI.
 
 ## Non-Functional Requirements

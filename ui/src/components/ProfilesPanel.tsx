@@ -12,6 +12,7 @@ type ProfileDraft = {
 type ProfilesPanelProps = {
   profiles: RenderProfile[];
   fxChains: FxChainCandidate[];
+  onPickFxChainPath: () => Promise<string[]>;
   onCreate: (input: {
     name: string;
     fxChainSourcePath?: string;
@@ -40,7 +41,7 @@ function buildDraft(profile: RenderProfile): ProfileDraft {
   };
 }
 
-export function ProfilesPanel({ profiles, fxChains, onCreate, onUpdate, onDelete }: ProfilesPanelProps) {
+export function ProfilesPanel({ profiles, fxChains, onPickFxChainPath, onCreate, onUpdate, onDelete }: ProfilesPanelProps) {
   const [name, setName] = useState("");
   const [fxChainPath, setFxChainPath] = useState("");
   const [notes, setNotes] = useState("");
@@ -79,6 +80,14 @@ export function ProfilesPanel({ profiles, fxChains, onCreate, onUpdate, onDelete
     setCopyToManagedStore(true);
   };
 
+  const browseCreateFxChain = async () => {
+    const [selectedPath] = await onPickFxChainPath();
+
+    if (selectedPath) {
+      setFxChainPath(selectedPath);
+    }
+  };
+
   const updateDraft = (profileId: string, patch: Partial<ProfileDraft>) => {
     setDrafts((current) => {
       const profile = profiles.find((entry) => entry.id === profileId);
@@ -109,6 +118,14 @@ export function ProfilesPanel({ profiles, fxChains, onCreate, onUpdate, onDelete
     });
   };
 
+  const browseProfileFxChain = async (profile: RenderProfile) => {
+    const [selectedPath] = await onPickFxChainPath();
+
+    if (selectedPath) {
+      updateDraft(profile.id, { fxChainPath: selectedPath });
+    }
+  };
+
   return (
     <section className="panel panel-profiles">
       <div className="panel-heading">
@@ -126,11 +143,16 @@ export function ProfilesPanel({ profiles, fxChains, onCreate, onUpdate, onDelete
 
         <label>
           <span>.RfxChain path (optional)</span>
-          <input
-            value={fxChainPath}
-            onChange={(event) => setFxChainPath(event.target.value)}
-            placeholder="/path/to/chain.RfxChain"
-          />
+          <div className="path-input-row">
+            <input
+              value={fxChainPath}
+              onChange={(event) => setFxChainPath(event.target.value)}
+              placeholder="/path/to/chain.RfxChain"
+            />
+            <button className="button" onClick={() => void browseCreateFxChain()} type="button">
+              Browse
+            </button>
+          </div>
         </label>
 
         <label>
@@ -187,11 +209,16 @@ export function ProfilesPanel({ profiles, fxChains, onCreate, onUpdate, onDelete
 
               <label>
                 <span>.RfxChain path</span>
-                <input
-                  value={(drafts[profile.id] ?? buildDraft(profile)).fxChainPath}
-                  onChange={(event) => updateDraft(profile.id, { fxChainPath: event.target.value })}
-                  placeholder="Leave empty for dry render"
-                />
+                <div className="path-input-row">
+                  <input
+                    value={(drafts[profile.id] ?? buildDraft(profile)).fxChainPath}
+                    onChange={(event) => updateDraft(profile.id, { fxChainPath: event.target.value })}
+                    placeholder="Leave empty for dry render"
+                  />
+                  <button className="button" onClick={() => void browseProfileFxChain(profile)} type="button">
+                    Browse
+                  </button>
+                </div>
               </label>
 
               <label className="checkbox-row">

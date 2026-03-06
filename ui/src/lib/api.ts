@@ -1,4 +1,4 @@
-import type { BootstrapPayload, RenderProfile, SavedBatchSettings, StatePayload } from "../types";
+import type { BootstrapPayload, PluginCatalogState, RenderProfile, SavedBatchSettings, StatePayload } from "../types";
 
 type CreateProfileInput = {
   name: string;
@@ -61,6 +61,10 @@ export async function fetchBootstrap() {
 
 export async function refreshEnvironment() {
   return request("/api/environment/refresh", { method: "POST" });
+}
+
+export async function refreshPluginCatalog() {
+  return request<PluginCatalogState>("/api/plugins/refresh", { method: "POST" });
 }
 
 export async function createProfile(input: CreateProfileInput) {
@@ -153,6 +157,24 @@ export async function startBatch() {
 
 export async function cancelBatch() {
   return request<{ cancelled: boolean }>("/api/batch/cancel", { method: "POST" });
+}
+
+export async function openFileDialog(input: { prompt?: string; multiple?: boolean; allowedExtensions?: string[] }) {
+  const response = await request<{ paths: string[] }>("/api/dialog/file", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+
+  return response.paths;
+}
+
+export async function openFolderDialog(input: { prompt?: string; allowCreate?: boolean }) {
+  const response = await request<{ path: string }>("/api/dialog/folder", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+
+  return response.path;
 }
 
 export function subscribeToEvents(handlers: {

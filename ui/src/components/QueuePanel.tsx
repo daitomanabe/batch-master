@@ -6,6 +6,9 @@ type QueuePanelProps = {
   profiles: RenderProfile[];
   savedSettings: SavedBatchSettings[];
   engine: EngineState;
+  onPickInputFile: () => Promise<string[]>;
+  onPickBulkFiles: () => Promise<string[]>;
+  onPickFolder: (prompt: string, allowCreate?: boolean) => Promise<string>;
   onAddJob: (input: { profileId: string; inputPath: string; outputPath: string }) => Promise<void>;
   onAddBatchJobs: (input: { profileId: string; inputPaths: string[]; outputDirectory?: string }) => Promise<void>;
   onQueueFolder: (input: {
@@ -70,6 +73,9 @@ export function QueuePanel({
   profiles,
   savedSettings,
   engine,
+  onPickInputFile,
+  onPickBulkFiles,
+  onPickFolder,
   onAddJob,
   onAddBatchJobs,
   onQueueFolder,
@@ -149,6 +155,46 @@ export function QueuePanel({
     setInputPath("");
     setOutputPath("");
     setLastSuggestedOutput("");
+  };
+
+  const browseSingleInput = async () => {
+    const [selectedPath] = await onPickInputFile();
+
+    if (selectedPath) {
+      setInputPath(selectedPath);
+    }
+  };
+
+  const browseBulkInputs = async () => {
+    const selectedPaths = await onPickBulkFiles();
+
+    if (selectedPaths.length > 0) {
+      setBulkInputPaths(selectedPaths.join("\n"));
+    }
+  };
+
+  const browseBulkOutputBase = async () => {
+    const selectedPath = await onPickFolder("Choose output base folder", true);
+
+    if (selectedPath) {
+      setBulkOutputDirectory(selectedPath);
+    }
+  };
+
+  const browseFolderInput = async () => {
+    const selectedPath = await onPickFolder("Choose input WAV folder");
+
+    if (selectedPath) {
+      setFolderInputDirectory(selectedPath);
+    }
+  };
+
+  const browseFolderOutputBase = async () => {
+    const selectedPath = await onPickFolder("Choose output base folder", true);
+
+    if (selectedPath) {
+      setFolderOutputBaseDirectory(selectedPath);
+    }
   };
 
   const submitBatch = async () => {
@@ -235,7 +281,12 @@ export function QueuePanel({
 
         <label>
           <span>Input file</span>
-          <input value={inputPath} onChange={(event) => setInputPath(event.target.value)} placeholder="/path/to/input.wav" />
+          <div className="path-input-row">
+            <input value={inputPath} onChange={(event) => setInputPath(event.target.value)} placeholder="/path/to/input.wav" />
+            <button className="button" onClick={() => void browseSingleInput()} type="button">
+              Browse
+            </button>
+          </div>
         </label>
 
         <label>
@@ -263,21 +314,31 @@ export function QueuePanel({
         <div className="form-grid">
           <label>
             <span>Input files</span>
-            <textarea
-              value={bulkInputPaths}
-              onChange={(event) => setBulkInputPaths(event.target.value)}
-              placeholder={"/path/to/track-01.wav\n/path/to/track-02.wav"}
-              rows={6}
-            />
+            <div className="stacked-input-row">
+              <textarea
+                value={bulkInputPaths}
+                onChange={(event) => setBulkInputPaths(event.target.value)}
+                placeholder={"/path/to/track-01.wav\n/path/to/track-02.wav"}
+                rows={6}
+              />
+              <button className="button" onClick={() => void browseBulkInputs()} type="button">
+                Choose WAV files
+              </button>
+            </div>
           </label>
 
           <label>
             <span>Output base folder (optional)</span>
-            <input
-              value={bulkOutputDirectory}
-              onChange={(event) => setBulkOutputDirectory(event.target.value)}
-              placeholder="/path/to/render-output"
-            />
+            <div className="path-input-row">
+              <input
+                value={bulkOutputDirectory}
+                onChange={(event) => setBulkOutputDirectory(event.target.value)}
+                placeholder="/path/to/render-output"
+              />
+              <button className="button" onClick={() => void browseBulkOutputBase()} type="button">
+                Choose/Create
+              </button>
+            </div>
           </label>
 
           <p className="field-hint">{batchInputPaths.length} file(s) ready to queue.</p>
@@ -319,20 +380,30 @@ export function QueuePanel({
         <div className="form-grid">
           <label>
             <span>Input folder</span>
-            <input
-              value={folderInputDirectory}
-              onChange={(event) => setFolderInputDirectory(event.target.value)}
-              placeholder="/path/to/wav-folder"
-            />
+            <div className="path-input-row">
+              <input
+                value={folderInputDirectory}
+                onChange={(event) => setFolderInputDirectory(event.target.value)}
+                placeholder="/path/to/wav-folder"
+              />
+              <button className="button" onClick={() => void browseFolderInput()} type="button">
+                Browse
+              </button>
+            </div>
           </label>
 
           <label>
             <span>Output base folder (optional)</span>
-            <input
-              value={folderOutputBaseDirectory}
-              onChange={(event) => setFolderOutputBaseDirectory(event.target.value)}
-              placeholder="/path/to/render-root"
-            />
+            <div className="path-input-row">
+              <input
+                value={folderOutputBaseDirectory}
+                onChange={(event) => setFolderOutputBaseDirectory(event.target.value)}
+                placeholder="/path/to/render-root"
+              />
+              <button className="button" onClick={() => void browseFolderOutputBase()} type="button">
+                Choose/Create
+              </button>
+            </div>
           </label>
 
           <label className="checkbox-row">

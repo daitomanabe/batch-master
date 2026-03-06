@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { JobsPanel } from "./components/JobsPanel";
 import { LogConsole } from "./components/LogConsole";
+import { PluginCatalogPanel } from "./components/PluginCatalogPanel";
 import { ProfilesPanel } from "./components/ProfilesPanel";
 import { QueuePanel } from "./components/QueuePanel";
 import { ReaperStatusPanel } from "./components/ReaperStatusPanel";
@@ -15,8 +16,11 @@ import {
   deleteSavedSettings,
   deleteProfile,
   fetchBootstrap,
+  openFileDialog,
+  openFolderDialog,
   queueFolderJobs,
   refreshEnvironment,
+  refreshPluginCatalog,
   removeJob,
   retryJob,
   startBatch,
@@ -24,7 +28,16 @@ import {
   updateSavedSettings,
   updateProfile,
 } from "./lib/api";
-import type { BatchJob, EngineState, FxChainCandidate, ReaperInfo, RenderProfile, SavedBatchSettings, StatePayload } from "./types";
+import type {
+  BatchJob,
+  EngineState,
+  FxChainCandidate,
+  PluginCatalogState,
+  ReaperInfo,
+  RenderProfile,
+  SavedBatchSettings,
+  StatePayload,
+} from "./types";
 
 const emptyEngine: EngineState = {
   running: false,
@@ -47,10 +60,18 @@ const emptyReaper: ReaperInfo = {
   version: "",
 };
 
+const emptyPluginCatalog: PluginCatalogState = {
+  plugins: [],
+  loadedFromCache: false,
+  cachePath: "",
+  lastUpdatedAt: null,
+};
+
 function applyStatePayload(
   payload: StatePayload,
   setProfiles: (value: RenderProfile[]) => void,
   setSavedSettings: (value: SavedBatchSettings[]) => void,
+  setPluginCatalog: (value: PluginCatalogState) => void,
   setJobs: (value: BatchJob[]) => void,
   setEngine: (value: EngineState) => void,
   setReaper: (value: ReaperInfo) => void,
@@ -58,6 +79,7 @@ function applyStatePayload(
 ) {
   setProfiles(payload.profiles);
   setSavedSettings(payload.savedSettings);
+  setPluginCatalog(payload.pluginCatalog);
   setJobs(payload.jobs);
   setEngine(payload.engine);
   setReaper(payload.reaper);
@@ -68,6 +90,7 @@ export default function App() {
   const [profiles, setProfiles] = useState<RenderProfile[]>([]);
   const [jobs, setJobs] = useState<BatchJob[]>([]);
   const [savedSettings, setSavedSettings] = useState<SavedBatchSettings[]>([]);
+  const [pluginCatalog, setPluginCatalog] = useState<PluginCatalogState>(emptyPluginCatalog);
   const [engine, setEngine] = useState<EngineState>(emptyEngine);
   const [reaper, setReaper] = useState<ReaperInfo>(emptyReaper);
   const [fxChains, setFxChains] = useState<FxChainCandidate[]>([]);
@@ -80,6 +103,7 @@ export default function App() {
     const payload = await fetchBootstrap();
     setProfiles(payload.profiles);
     setSavedSettings(payload.savedSettings);
+    setPluginCatalog(payload.pluginCatalog);
     setJobs(payload.jobs);
     setEngine(payload.engine);
     setReaper(payload.reaper);
@@ -96,7 +120,7 @@ export default function App() {
     const unsubscribe = subscribeToEvents({
       onState: (payload) => {
         setStreamConnected(true);
-        applyStatePayload(payload, setProfiles, setSavedSettings, setJobs, setEngine, setReaper, setFxChains);
+        applyStatePayload(payload, setProfiles, setSavedSettings, setPluginCatalog, setJobs, setEngine, setReaper, setFxChains);
       },
       onLogs: (snapshot) => {
         setStreamConnected(true);
@@ -151,12 +175,15 @@ export default function App() {
       <section className="dashboard">
         <ReaperStatusPanel
           reaper={reaper}
+          pluginCatalog={pluginCatalog}
           engine={engine}
           onRefresh={() => void runAction("Environment refreshed.", async () => void (await refreshEnvironment()))}
+          onRefreshPlugins={() => void runAction("Plugin catalog refreshed.", async () => void (await refreshPluginCatalog()))}
         />
         <ProfilesPanel
           profiles={profiles}
           fxChains={fxChains}
+          onPickFxChainPath={() => openFileDialog({ prompt: "Choose .RfxChain file", allowedExtensions: ["RfxChain", "rfxchain"] })}
           onCreate={(input) => runAction(`Profile created: ${input.name}`, async () => void (await createProfile(input)))}
           onUpdate={(profileId, input) => runAction("Profile updated.", async () => void (await updateProfile(profileId, input)))}
           onDelete={(profileId) => runAction("Profile deleted.", async () => void (await deleteProfile(profileId)))}
@@ -165,6 +192,9 @@ export default function App() {
           profiles={profiles}
           savedSettings={savedSettings}
           engine={engine}
+          onPickInputFile={() => openFileDialog({ prompt: "Choose input WAV file", allowedExtensions: ["wav", "wave"] })}
+          onPickBulkFiles={() => openFileDialog({ prompt: "Choose WAV files", multiple: true, allowedExtensions: ["wav", "wave"] })}
+          onPickFolder={(prompt, allowCreate) => openFolderDialog({ prompt, allowCreate })}
           onAddJob={(input) => runAction("Job queued.", async () => void (await addJob(input)))}
           onAddBatchJobs={(input) => runAction("Batch jobs queued.", async () => void (await addBatchJobs(input)))}
           onQueueFolder={(input) => runAction("Folder queued.", async () => void (await queueFolderJobs(input)))}
@@ -184,6 +214,7 @@ export default function App() {
           onRemove={(jobId) => runAction("Job removed.", async () => void (await removeJob(jobId)))}
           onClearFinished={() => runAction("Finished jobs cleared.", async () => void (await clearFinishedJobs()))}
         />
+        <PluginCatalogPanel pluginCatalog={pluginCatalog} />
         <LogConsole lines={logs} />
       </section>
     </main>

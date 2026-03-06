@@ -10,8 +10,10 @@ BatchMaster is a local batch renderer that uses the installed REAPER application
 - Queues every WAV file in a folder, with optional recursive scan.
 - Suggests output filenames from the selected profile and source file.
 - Keeps original file names and writes them into a folder named after the selected profile.
+- Opens native macOS file and folder dialogs from the UI for `.RfxChain`, WAV, and folder selection.
 - Launches REAPER in `-batchconvert` mode one job at a time.
 - Lets you retry or remove completed jobs from the queue history.
+- Loads the REAPER plugin catalog on first launch and reuses the cached catalog on later launches.
 - Streams REAPER splash logs and BatchMaster engine logs into a debug console.
 - Saves and reloads folder-batch settings.
 - Persists jobs, profiles, and logs in `~/Library/Application Support/BatchMaster`.

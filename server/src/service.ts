@@ -11,6 +11,8 @@ import type {
   BootstrapPayload,
   EngineState,
   FxChainCandidate,
+  PluginCatalogState,
+  PluginInfo,
   ReaperInfo,
   RenderProfile,
   SavedBatchSettings,
@@ -75,8 +77,14 @@ const RUNS_DIR = path.join(APP_DATA_DIR, "runs");
 const LOGS_DIR = path.join(APP_DATA_DIR, "logs");
 const PROFILES_PATH = path.join(APP_DATA_DIR, "profiles.json");
 const SAVED_SETTINGS_PATH = path.join(APP_DATA_DIR, "saved-settings.json");
+const PLUGIN_CACHE_PATH = path.join(APP_DATA_DIR, "plugin-cache.json");
 const JOBS_PATH = path.join(APP_DATA_DIR, "jobs.json");
 const ENGINE_LOG_PATH = path.join(LOGS_DIR, "engine.log");
+
+type StoredPluginCatalog = {
+  plugins: PluginInfo[];
+  lastUpdatedAt: string | null;
+};
 
 const EMPTY_ENGINE_STATE: EngineState = {
   running: false,
@@ -205,11 +213,212 @@ function ensureUniqueOutputPath(outputPath: string, usedPaths: Set<string>) {
   }
 }
 
+function normalizePluginDisplayName(displayName: string) {
+  const instrument = displayName.includes("!!!VSTi");
+  let cleaned = displayName.replace(/!!!VSTi/g, "").trim();
+
+  cleaned = cleaned.replace(/\(\d+\s*out\)$/i, "").trim();
+  cleaned = cleaned.replace(/\(\d+->\d+ch\)$/i, "").trim();
+
+  const matches = [...cleaned.matchAll(/\(([^()]+)\)/g)];
+  const vendor = matches.length > 0 ? matches[matches.length - 1][1].trim() : "";
+
+  return {
+    name: cleaned,
+    vendor,
+    instrument,
+  };
+}
+
+function parseVstPlugins(filePath: string) {
+  if (!existsSync(filePath)) {
+    return [] as PluginInfo[];
+  }
+
+  const lines = readFileSync(filePath, "utf8").split(/\r?\n/);
+  const plugins: PluginInfo[] = [];
+  let inSection = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    if (!line) {
+      continue;
+    }
+
+    if (line.startsWith("[")) {
+      inSection = line.toLowerCase() === "[vstcache]";
+      continue;
+    }
+
+    if (!inSection) {
+      continue;
+    }
+
+    const separatorIndex = line.indexOf("=");
+
+    if (separatorIndex < 0) {
+      continue;
+    }
+
+    const fileName = line.slice(0, separatorIndex).trim();
+    const payload = line.slice(separatorIndex + 1).trim();
+    const parts = payload.split(",");
+    const displayName = parts.slice(2).join(",").trim();
+
+    if (!fileName || !displayName) {
+      continue;
+    }
+
+    const normalized = normalizePluginDisplayName(displayName);
+
+    plugins.push({
+      id: buildId(`vst:${fileName}:${normalized.name}`),
+      name: normalized.name,
+      vendor: normalized.vendor,
+      format: fileName.toLowerCase().endsWith(".vst3") ? "VST3" : "VST",
+      instrument: normalized.instrument,
+      sourceFile: path.basename(filePath),
+    });
+  }
+
+  return plugins;
+}
+
+function parseAuPlugins(filePath: string) {
+  if (!existsSync(filePath)) {
+    return [] as PluginInfo[];
+  }
+
+  const lines = readFileSync(filePath, "utf8").split(/\r?\n/);
+  const plugins: PluginInfo[] = [];
+  let inSection = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    if (!line) {
+      continue;
+    }
+
+    if (line.startsWith("[")) {
+      inSection = line.toLowerCase() === "[auplugins]";
+      continue;
+    }
+
+    if (!inSection) {
+      continue;
+    }
+
+    const separatorIndex = line.indexOf("=");
+
+    if (separatorIndex < 0) {
+      continue;
+    }
+
+    const left = line.slice(0, separatorIndex).trim();
+    const right = line.slice(separatorIndex + 1).trim();
+    const vendorSeparator = left.indexOf(":");
+    const vendor = vendorSeparator >= 0 ? left.slice(0, vendorSeparator).trim() : "";
+    const name = vendorSeparator >= 0 ? left.slice(vendorSeparator + 1).trim() : left;
+
+    plugins.push({
+      id: buildId(`au:${left}`),
+      name,
+      vendor,
+      format: "AU",
+      instrument: right === "<inst>",
+      sourceFile: path.basename(filePath),
+    });
+  }
+
+  return plugins;
+}
+
+function parseClapPlugins(filePath: string) {
+  if (!existsSync(filePath)) {
+    return [] as PluginInfo[];
+  }
+
+  const lines = readFileSync(filePath, "utf8").split(/\r?\n/);
+  const plugins: PluginInfo[] = [];
+  let currentSection = "";
+  let captured = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    if (!line) {
+      continue;
+    }
+
+    if (line.startsWith("[") && line.endsWith("]")) {
+      currentSection = line.slice(1, -1).trim();
+      captured = false;
+      continue;
+    }
+
+    if (!currentSection || captured || line.startsWith("_=")) {
+      continue;
+    }
+
+    const separatorIndex = line.indexOf("=");
+
+    if (separatorIndex < 0) {
+      continue;
+    }
+
+    const payload = line.slice(separatorIndex + 1);
+    const pipeIndex = payload.indexOf("|");
+
+    if (pipeIndex < 0) {
+      continue;
+    }
+
+    const instrumentFlag = payload.slice(0, pipeIndex).trim();
+    const displayName = payload.slice(pipeIndex + 1).trim();
+    const normalized = normalizePluginDisplayName(displayName);
+
+    plugins.push({
+      id: buildId(`clap:${currentSection}:${normalized.name}`),
+      name: normalized.name,
+      vendor: normalized.vendor,
+      format: "CLAP",
+      instrument: instrumentFlag === "1",
+      sourceFile: path.basename(filePath),
+    });
+
+    captured = true;
+  }
+
+  return plugins;
+}
+
+function escapeAppleScriptString(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function runAppleScript(lines: string[]) {
+  const result = spawnSync(
+    "osascript",
+    lines.flatMap((line) => ["-e", line]),
+    { encoding: "utf8" },
+  );
+
+  if (result.status !== 0) {
+    const errorText = result.stderr?.trim() || result.stdout?.trim() || "AppleScript command failed.";
+    throw new Error(errorText);
+  }
+
+  return result.stdout.trim();
+}
+
 export class BatchMasterService {
   private readonly events = new EventStream();
   private reaperInfo: ReaperInfo;
   private profiles: RenderProfile[];
   private savedSettings: SavedBatchSettings[];
+  private pluginCatalog: PluginCatalogState;
   private jobs: BatchJob[];
   private logs: string[];
   private engine = { ...EMPTY_ENGINE_STATE };
@@ -226,6 +435,7 @@ export class BatchMasterService {
     this.reaperInfo = this.detectReaper();
     this.profiles = readJsonFile<RenderProfile[]>(PROFILES_PATH, []);
     this.savedSettings = readJsonFile<SavedBatchSettings[]>(SAVED_SETTINGS_PATH, []);
+    this.pluginCatalog = this.loadPluginCatalog();
     this.jobs = readJsonFile<BatchJob[]>(JOBS_PATH, []).map((job) => ({
       ...job,
       progress: job.status === "done" ? 1 : job.status === "processing" ? 0 : job.progress ?? 0,
@@ -262,6 +472,7 @@ export class BatchMasterService {
     return {
       profiles: this.profiles,
       savedSettings: this.savedSettings,
+      pluginCatalog: this.pluginCatalog,
       jobs: this.jobs,
       engine: this.engine,
       logs: this.logs,
@@ -274,6 +485,7 @@ export class BatchMasterService {
     return {
       profiles: this.profiles,
       savedSettings: this.savedSettings,
+      pluginCatalog: this.pluginCatalog,
       jobs: this.jobs,
       engine: this.engine,
       reaper: this.reaperInfo,
@@ -797,6 +1009,69 @@ export class BatchMasterService {
     return this.reaperInfo;
   }
 
+  refreshPluginCatalog() {
+    this.pluginCatalog = this.scanPluginCatalog();
+    this.emitState();
+    this.log(`Plugin catalog refreshed: ${this.pluginCatalog.plugins.length} plugins.`);
+    return this.pluginCatalog;
+  }
+
+  chooseFilePaths(prompt: string, multiple = false, allowedExtensions: string[] = []) {
+    const sanitizedPrompt = escapeAppleScriptString(prompt);
+    const typeList =
+      allowedExtensions.length > 0
+        ? ` of type {${allowedExtensions.map((extension) => `"${escapeAppleScriptString(extension)}"`).join(", ")}}`
+        : "";
+
+    if (multiple) {
+      const output = runAppleScript([
+        "try",
+        `set chosenItems to choose file with prompt "${sanitizedPrompt}" with multiple selections allowed${typeList}`,
+        "set outputText to \"\"",
+        "repeat with chosenItem in chosenItems",
+        "set outputText to outputText & POSIX path of chosenItem & linefeed",
+        "end repeat",
+        "return outputText",
+        "on error number -128",
+        "return \"\"",
+        "end try",
+      ]);
+
+      return output.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean);
+    }
+
+    const output = runAppleScript([
+      "try",
+      `return POSIX path of (choose file with prompt "${sanitizedPrompt}"${typeList})`,
+      "on error number -128",
+      "return \"\"",
+      "end try",
+    ]);
+
+    return output ? [output] : [];
+  }
+
+  chooseFolderPath(prompt: string, allowCreate = false) {
+    const sanitizedPrompt = escapeAppleScriptString(prompt);
+    const output = allowCreate
+      ? runAppleScript([
+          "try",
+          `return POSIX path of (choose folder name with prompt "${sanitizedPrompt}")`,
+          "on error number -128",
+          "return \"\"",
+          "end try",
+        ])
+      : runAppleScript([
+          "try",
+          `return POSIX path of (choose folder with prompt "${sanitizedPrompt}")`,
+          "on error number -128",
+          "return \"\"",
+          "end try",
+        ]);
+
+    return output.trim();
+  }
+
   private async runLoop() {
     while (true) {
       const nextJob = this.jobs.find((job) => job.status === "queued");
@@ -1083,6 +1358,15 @@ export class BatchMasterService {
     writeJsonFile(SAVED_SETTINGS_PATH, this.savedSettings);
   }
 
+  private savePluginCatalog(catalog: PluginCatalogState) {
+    const stored: StoredPluginCatalog = {
+      plugins: catalog.plugins,
+      lastUpdatedAt: catalog.lastUpdatedAt,
+    };
+
+    writeJsonFile(PLUGIN_CACHE_PATH, stored);
+  }
+
   private saveJobs() {
     writeJsonFile(JOBS_PATH, this.jobs);
   }
@@ -1134,6 +1418,40 @@ export class BatchMasterService {
       appDataDir: APP_DATA_DIR,
       version,
     };
+  }
+
+  private loadPluginCatalog() {
+    const fallback: StoredPluginCatalog = { plugins: [], lastUpdatedAt: null };
+    const stored = readJsonFile<StoredPluginCatalog>(PLUGIN_CACHE_PATH, fallback);
+
+    if (stored.plugins.length > 0) {
+      return {
+        plugins: stored.plugins,
+        loadedFromCache: true,
+        cachePath: PLUGIN_CACHE_PATH,
+        lastUpdatedAt: stored.lastUpdatedAt,
+      } satisfies PluginCatalogState;
+    }
+
+    return this.scanPluginCatalog();
+  }
+
+  private scanPluginCatalog() {
+    const plugins = [
+      ...parseVstPlugins(path.join(REAPER_RESOURCE_DIR, "reaper-vstplugins_arm64.ini")),
+      ...parseAuPlugins(path.join(REAPER_RESOURCE_DIR, "reaper-auplugins_arm64.ini")),
+      ...parseClapPlugins(path.join(REAPER_RESOURCE_DIR, "reaper-clap-macos-aarch64.ini")),
+    ].sort((left, right) => left.name.localeCompare(right.name));
+
+    const catalog: PluginCatalogState = {
+      plugins,
+      loadedFromCache: false,
+      cachePath: PLUGIN_CACHE_PATH,
+      lastUpdatedAt: nowIso(),
+    };
+
+    this.savePluginCatalog(catalog);
+    return catalog;
   }
 
   private normalizeSavedSettingsInput(input: SavedSettingsInput) {

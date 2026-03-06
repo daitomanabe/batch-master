@@ -127,6 +127,7 @@ label span {
   grid-template-areas:
     "status profiles"
     "queue jobs"
+    "plugins plugins"
     "console console";
 }
 
@@ -152,6 +153,10 @@ label span {
 
 .panel-console {
   grid-area: console;
+}
+
+.panel-plugins {
+  grid-area: plugins;
 }
 
 .panel-heading {
@@ -227,6 +232,18 @@ label span {
   gap: 0.85rem;
 }
 
+.path-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.stacked-input-row {
+  display: grid;
+  gap: 0.75rem;
+}
+
 .settings-strip {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-bottom: 0.85rem;
@@ -247,7 +264,8 @@ label span {
 
 .status-card,
 .profile-card,
-.job-card {
+.job-card,
+.plugin-row {
   border-radius: 22px;
   border: 1px solid rgba(31, 20, 12, 0.08);
   background: var(--surface-strong);
@@ -255,7 +273,8 @@ label span {
 }
 
 .profile-card,
-.job-card {
+.job-card,
+.plugin-row {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
@@ -278,14 +297,17 @@ label span {
 .profile-card h3,
 .job-card h3,
 .status-card h3,
-.candidate-list h3 {
+.candidate-list h3,
+.plugin-row h3 {
   margin: 0;
 }
 
 .profile-card p,
 .job-card p,
 .status-card p,
-.hero-status p {
+.hero-status p,
+.plugin-row p,
+.plugin-summary p {
   margin: 0.3rem 0 0;
   color: var(--muted);
 }
@@ -363,6 +385,19 @@ label span {
 
 .job-actions {
   width: 100%;
+}
+
+.plugin-summary,
+.plugin-list,
+.plugin-meta {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.plugin-list {
+  margin-top: 1rem;
+  max-height: 360px;
+  overflow: auto;
 }
 
 .progress-track {

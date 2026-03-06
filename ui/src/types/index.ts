@@ -21,6 +21,22 @@ export type SavedBatchSettings = {
   updatedAt: string;
 };
 
+export type PluginInfo = {
+  id: string;
+  name: string;
+  vendor: string;
+  format: "VST" | "VST3" | "AU" | "CLAP";
+  instrument: boolean;
+  sourceFile: string;
+};
+
+export type PluginCatalogState = {
+  plugins: PluginInfo[];
+  loadedFromCache: boolean;
+  cachePath: string;
+  lastUpdatedAt: string | null;
+};
+
 export type BatchJob = {
   id: string;
   profileId: string;
@@ -68,6 +84,7 @@ export type FxChainCandidate = {
 export type BootstrapPayload = {
   profiles: RenderProfile[];
   savedSettings: SavedBatchSettings[];
+  pluginCatalog: PluginCatalogState;
   jobs: BatchJob[];
   engine: EngineState;
   logs: string[];

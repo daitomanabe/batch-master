@@ -23,6 +23,35 @@ app.post("/api/environment/refresh", (_request, response) => {
   response.json(service.refreshEnvironment());
 });
 
+app.post("/api/plugins/refresh", (_request, response) => {
+  response.json(service.refreshPluginCatalog());
+});
+
+app.post("/api/dialog/file", (request, response) => {
+  try {
+    const paths = service.chooseFilePaths(
+      (request.body as { prompt?: string }).prompt ?? "Choose file",
+      Boolean((request.body as { multiple?: boolean }).multiple),
+      ((request.body as { allowedExtensions?: string[] }).allowedExtensions ?? []).filter(Boolean),
+    );
+    response.json({ paths });
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "Could not open file dialog." });
+  }
+});
+
+app.post("/api/dialog/folder", (request, response) => {
+  try {
+    const pathValue = service.chooseFolderPath(
+      (request.body as { prompt?: string }).prompt ?? "Choose folder",
+      Boolean((request.body as { allowCreate?: boolean }).allowCreate),
+    );
+    response.json({ path: pathValue });
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "Could not open folder dialog." });
+  }
+});
+
 app.get("/api/events", (request, response) => {
   void request;
   service.subscribe(response);

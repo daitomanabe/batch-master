@@ -1,12 +1,14 @@
-import type { EngineState, ReaperInfo } from "../types";
+import type { EngineState, PluginCatalogState, ReaperInfo } from "../types";
 
 type ReaperStatusPanelProps = {
   reaper: ReaperInfo;
+  pluginCatalog: PluginCatalogState;
   engine: EngineState;
   onRefresh: () => void;
+  onRefreshPlugins: () => void;
 };
 
-export function ReaperStatusPanel({ reaper, engine, onRefresh }: ReaperStatusPanelProps) {
+export function ReaperStatusPanel({ reaper, pluginCatalog, engine, onRefresh, onRefreshPlugins }: ReaperStatusPanelProps) {
   return (
     <section className="panel panel-status">
       <div className="panel-heading">
@@ -14,9 +16,14 @@ export function ReaperStatusPanel({ reaper, engine, onRefresh }: ReaperStatusPan
           <p className="eyebrow">Environment</p>
           <h2>REAPER Engine</h2>
         </div>
-        <button className="button" onClick={onRefresh}>
-          Refresh
-        </button>
+        <div className="actions-row">
+          <button className="button" onClick={onRefresh}>
+            Refresh
+          </button>
+          <button className="button" onClick={onRefreshPlugins}>
+            Refresh plugins
+          </button>
+        </div>
       </div>
 
       <div className="status-grid">
@@ -49,6 +56,13 @@ export function ReaperStatusPanel({ reaper, engine, onRefresh }: ReaperStatusPan
           <span className="badge">App Data</span>
           <h3>BatchMaster State Dir</h3>
           <code>{reaper.appDataDir}</code>
+        </div>
+
+        <div className="status-card">
+          <span className="badge">Plugins</span>
+          <h3>Plugin Catalog</h3>
+          <p>{pluginCatalog.plugins.length} plugins</p>
+          <p>{pluginCatalog.loadedFromCache ? "Loaded from cache" : "Scanned from REAPER caches"}</p>
         </div>
       </div>
     </section>
