@@ -122,6 +122,20 @@ app.post("/api/jobs/folder", (request, response) => {
   }
 });
 
+app.post("/api/simple-batch/run", async (request, response) => {
+  try {
+    const result = await service.runSimpleFolderBatch(request.body as {
+      pluginName: string;
+      fxChainSourcePath?: string;
+      inputDirectory: string;
+      recursive?: boolean;
+    });
+    response.json(result);
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : "Could not start simple batch." });
+  }
+});
+
 app.post("/api/jobs/:jobId/retry", (request, response) => {
   try {
     const job = service.retryJob(request.params.jobId);

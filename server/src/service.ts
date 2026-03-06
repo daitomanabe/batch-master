@@ -69,6 +69,13 @@ type SavedSettingsUpdateInput = {
   recursive?: boolean;
 };
 
+type SimpleBatchInput = {
+  pluginName: string;
+  fxChainSourcePath?: string;
+  inputDirectory: string;
+  recursive?: boolean;
+};
+
 const REAPER_BINARY = process.env.BM_REAPER_PATH ?? "/Applications/REAPER.app/Contents/MacOS/REAPER";
 const REAPER_RESOURCE_DIR = path.join(os.homedir(), "Library/Application Support/REAPER");
 const APP_DATA_DIR = path.join(os.homedir(), "Library/Application Support/BatchMaster");
@@ -894,6 +901,62 @@ export class BatchMasterService {
     this.saveSavedSettings();
     this.log(`Saved settings deleted: ${target.name}`);
     this.emitState();
+  }
+
+  async runSimpleFolderBatch(input: SimpleBatchInput) {
+    if (this.engine.running) {
+      throw new Error("Batch is already running.");
+    }
+
+    const pluginName = input.pluginName.trim();
+    const inputDirectory = input.inputDirectory.trim();
+
+    if (!pluginName) {
+      throw new Error("Plugin name is required.");
+    }
+
+    if (!inputDirectory) {
+      throw new Error("Input folder is required.");
+    }
+
+    this.jobs = [];
+    this.saveJobs();
+    this.refreshEngineCounters();
+    this.emitState();
+
+    const existingProfile = this.profiles.find((profile) => profile.name === pluginName);
+    let profile: RenderProfile;
+
+    if (existingProfile) {
+      profile = await this.updateProfile(existingProfile.id, {
+        name: pluginName,
+        fxChainSourcePath: input.fxChainSourcePath ?? "",
+        copyToManagedStore: true,
+        clearFxChain: !input.fxChainSourcePath?.trim(),
+        notes: `Auto-generated profile for ${pluginName}`,
+      });
+    } else {
+      profile = await this.createProfile({
+        name: pluginName,
+        fxChainSourcePath: input.fxChainSourcePath ?? "",
+        copyToManagedStore: true,
+        notes: `Auto-generated profile for ${pluginName}`,
+      });
+    }
+
+    const queuedJobs = this.queueFolderJobs({
+      profileId: profile.id,
+      inputDirectory,
+      recursive: input.recursive ?? true,
+    });
+
+    await this.startBatch();
+
+    return {
+      started: true,
+      queuedJobs: queuedJobs.length,
+      profile,
+    };
   }
 
   clearFinishedJobs() {

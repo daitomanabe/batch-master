@@ -125,9 +125,8 @@ label span {
   gap: 1rem;
   grid-template-columns: 1.05fr 1.1fr;
   grid-template-areas:
-    "status profiles"
-    "queue jobs"
-    "plugins plugins"
+    "status simple"
+    "jobs jobs"
     "console console";
 }
 
@@ -139,14 +138,6 @@ label span {
   grid-area: status;
 }
 
-.panel-profiles {
-  grid-area: profiles;
-}
-
-.panel-queue {
-  grid-area: queue;
-}
-
 .panel-jobs {
   grid-area: jobs;
 }
@@ -155,8 +146,8 @@ label span {
   grid-area: console;
 }
 
-.panel-plugins {
-  grid-area: plugins;
+.panel-simple {
+  grid-area: simple;
 }
 
 .panel-heading {
@@ -212,6 +203,12 @@ label span {
   display: grid;
   gap: 0.85rem;
   margin-bottom: 1rem;
+}
+
+.simple-grid,
+.simple-actions {
+  display: grid;
+  gap: 0.85rem;
 }
 
 .field-hint {

@@ -2,31 +2,16 @@ import { useEffect, useState } from "react";
 
 import { JobsPanel } from "./components/JobsPanel";
 import { LogConsole } from "./components/LogConsole";
-import { PluginCatalogPanel } from "./components/PluginCatalogPanel";
-import { ProfilesPanel } from "./components/ProfilesPanel";
-import { QueuePanel } from "./components/QueuePanel";
 import { ReaperStatusPanel } from "./components/ReaperStatusPanel";
+import { SimpleBatchPanel } from "./components/SimpleBatchPanel";
 import {
-  addJob,
-  addBatchJobs,
-  cancelBatch,
-  clearFinishedJobs,
-  createSavedSettings,
-  createProfile,
-  deleteSavedSettings,
-  deleteProfile,
   fetchBootstrap,
   openFileDialog,
   openFolderDialog,
-  queueFolderJobs,
   refreshEnvironment,
   refreshPluginCatalog,
-  removeJob,
-  retryJob,
-  startBatch,
+  runSimpleBatch,
   subscribeToEvents,
-  updateSavedSettings,
-  updateProfile,
 } from "./lib/api";
 import type {
   BatchJob,
@@ -159,7 +144,7 @@ export default function App() {
           <p className="eyebrow">Production workflow</p>
           <h1>BatchMaster for REAPER</h1>
           <p className="hero-copy">
-            Queue offline renders, run REAPER in batch-convert mode, and debug startup or plugin-scan delays from a live console.
+            Choose a folder, choose a plugin and its `.RfxChain` setting, then batch export.
           </p>
         </div>
         <div className="hero-status">
@@ -180,41 +165,18 @@ export default function App() {
           onRefresh={() => void runAction("Environment refreshed.", async () => void (await refreshEnvironment()))}
           onRefreshPlugins={() => void runAction("Plugin catalog refreshed.", async () => void (await refreshPluginCatalog()))}
         />
-        <ProfilesPanel
-          profiles={profiles}
+        <SimpleBatchPanel
+          pluginCatalog={pluginCatalog}
           fxChains={fxChains}
-          onPickFxChainPath={() => openFileDialog({ prompt: "Choose .RfxChain file", allowedExtensions: ["RfxChain", "rfxchain"] })}
-          onCreate={(input) => runAction(`Profile created: ${input.name}`, async () => void (await createProfile(input)))}
-          onUpdate={(profileId, input) => runAction("Profile updated.", async () => void (await updateProfile(profileId, input)))}
-          onDelete={(profileId) => runAction("Profile deleted.", async () => void (await deleteProfile(profileId)))}
-        />
-        <QueuePanel
-          profiles={profiles}
-          savedSettings={savedSettings}
           engine={engine}
-          onPickInputFile={() => openFileDialog({ prompt: "Choose input WAV file", allowedExtensions: ["wav", "wave"] })}
-          onPickBulkFiles={() => openFileDialog({ prompt: "Choose WAV files", multiple: true, allowedExtensions: ["wav", "wave"] })}
-          onPickFolder={(prompt, allowCreate) => openFolderDialog({ prompt, allowCreate })}
-          onAddJob={(input) => runAction("Job queued.", async () => void (await addJob(input)))}
-          onAddBatchJobs={(input) => runAction("Batch jobs queued.", async () => void (await addBatchJobs(input)))}
-          onQueueFolder={(input) => runAction("Folder queued.", async () => void (await queueFolderJobs(input)))}
-          onCreateSavedSettings={(input) => runAction(`Settings saved: ${input.name}`, async () => void (await createSavedSettings(input)))}
-          onUpdateSavedSettings={(settingsId, input) =>
-            runAction("Settings updated.", async () => void (await updateSavedSettings(settingsId, input)))
-          }
-          onDeleteSavedSettings={(settingsId) =>
-            runAction("Settings deleted.", async () => void (await deleteSavedSettings(settingsId)))
-          }
-          onStart={() => runAction("Batch started.", async () => void (await startBatch()))}
-          onCancel={() => runAction("Batch cancellation requested.", async () => void (await cancelBatch()))}
+          onPickInputFolder={() => openFolderDialog({ prompt: "Choose input WAV folder" })}
+          onPickFxChainFile={() => openFileDialog({ prompt: "Choose .RfxChain file", allowedExtensions: ["RfxChain", "rfxchain"] })}
+          onRun={(input) => runAction("Batch started.", async () => void (await runSimpleBatch(input)))}
         />
         <JobsPanel
           jobs={jobs}
-          onRetry={(jobId) => runAction("Job re-queued.", async () => void (await retryJob(jobId)))}
-          onRemove={(jobId) => runAction("Job removed.", async () => void (await removeJob(jobId)))}
-          onClearFinished={() => runAction("Finished jobs cleared.", async () => void (await clearFinishedJobs()))}
+          compact
         />
-        <PluginCatalogPanel pluginCatalog={pluginCatalog} />
         <LogConsole lines={logs} />
       </section>
     </main>

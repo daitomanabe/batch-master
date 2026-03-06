@@ -34,6 +34,13 @@ type SavedSettingsInput = {
   recursive?: boolean;
 };
 
+type SimpleBatchRunInput = {
+  pluginName: string;
+  fxChainSourcePath?: string;
+  inputDirectory: string;
+  recursive?: boolean;
+};
+
 async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const response = await fetch(input, {
     ...init,
@@ -110,6 +117,13 @@ export async function addBatchJobs(input: AddBatchJobsInput) {
 
 export async function queueFolderJobs(input: QueueFolderJobsInput) {
   return request("/api/jobs/folder", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function runSimpleBatch(input: SimpleBatchRunInput) {
+  return request<{ started: boolean; queuedJobs: number }>("/api/simple-batch/run", {
     method: "POST",
     body: JSON.stringify(input),
   });
