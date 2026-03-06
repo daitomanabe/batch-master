@@ -1,9 +1,8 @@
 import { useMemo, useState } from "react";
 
-import type { EngineState, FxChainCandidate } from "../types";
+import type { EngineState } from "../types";
 
 type SimpleBatchPanelProps = {
-  fxChains: FxChainCandidate[];
   engine: EngineState;
   onPickInputFolder: () => Promise<string>;
   onPickFxChainFile: () => Promise<string[]>;
@@ -36,7 +35,6 @@ function getParentDirectory(directoryPath: string) {
 }
 
 export function SimpleBatchPanel({
-  fxChains,
   engine,
   onPickInputFolder,
   onPickFxChainFile,
@@ -113,19 +111,6 @@ export function SimpleBatchPanel({
             </button>
           </div>
         </label>
-      </div>
-
-      <div className="candidate-list">
-        <h3>Detected .RfxChain files</h3>
-        {fxChains.length === 0 ? (
-          <div className="empty-state">No `.RfxChain` files found yet. Create one in REAPER and choose it.</div>
-        ) : (
-          fxChains.slice(0, 12).map((candidate) => (
-            <button className="candidate-chip" key={candidate.id} onClick={() => setFxChainPath(candidate.path)} type="button">
-              {candidate.name}
-            </button>
-          ))
-        )}
       </div>
 
       {outputFolderNamePreview ? <p className="field-hint">Output folder: {outputFolderNamePreview}</p> : null}

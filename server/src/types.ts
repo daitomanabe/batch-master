@@ -65,6 +65,7 @@ export type BatchJob = {
   completedAt: string | null;
   splashLogPath: string | null;
   stderrLogPath: string | null;
+  debugReportPath: string | null;
 };
 
 export type EngineState = {

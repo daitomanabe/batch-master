@@ -16,7 +16,6 @@ import {
 import type {
   BatchJob,
   EngineState,
-  FxChainCandidate,
   PluginCatalogState,
   ReaperInfo,
   RenderProfile,
@@ -60,7 +59,6 @@ function applyStatePayload(
   setJobs: (value: BatchJob[]) => void,
   setEngine: (value: EngineState) => void,
   setReaper: (value: ReaperInfo) => void,
-  setFxChains: (value: FxChainCandidate[]) => void,
 ) {
   setProfiles(payload.profiles);
   setSavedSettings(payload.savedSettings);
@@ -68,7 +66,6 @@ function applyStatePayload(
   setJobs(payload.jobs);
   setEngine(payload.engine);
   setReaper(payload.reaper);
-  setFxChains(payload.fxChains);
 }
 
 export default function App() {
@@ -78,7 +75,6 @@ export default function App() {
   const [pluginCatalog, setPluginCatalog] = useState<PluginCatalogState>(emptyPluginCatalog);
   const [engine, setEngine] = useState<EngineState>(emptyEngine);
   const [reaper, setReaper] = useState<ReaperInfo>(emptyReaper);
-  const [fxChains, setFxChains] = useState<FxChainCandidate[]>([]);
   const [logs, setLogs] = useState<string[]>([]);
   const [status, setStatus] = useState("Loading BatchMaster...");
   const [error, setError] = useState("");
@@ -92,7 +88,6 @@ export default function App() {
     setJobs(payload.jobs);
     setEngine(payload.engine);
     setReaper(payload.reaper);
-    setFxChains(payload.fxChains);
     setLogs(payload.logs);
     setStatus(payload.reaper.available ? "REAPER environment ready." : "REAPER binary was not detected.");
   };
@@ -105,7 +100,7 @@ export default function App() {
     const unsubscribe = subscribeToEvents({
       onState: (payload) => {
         setStreamConnected(true);
-        applyStatePayload(payload, setProfiles, setSavedSettings, setPluginCatalog, setJobs, setEngine, setReaper, setFxChains);
+        applyStatePayload(payload, setProfiles, setSavedSettings, setPluginCatalog, setJobs, setEngine, setReaper);
       },
       onLogs: (snapshot) => {
         setStreamConnected(true);
@@ -166,7 +161,6 @@ export default function App() {
           onRefreshPlugins={() => void runAction("Plugin catalog refreshed.", async () => void (await refreshPluginCatalog()))}
         />
         <SimpleBatchPanel
-          fxChains={fxChains}
           engine={engine}
           onPickInputFolder={() => openFolderDialog({ prompt: "Choose input WAV folder" })}
           onPickFxChainFile={() => openFileDialog({ prompt: "Choose .RfxChain file", allowedExtensions: ["RfxChain", "rfxchain"] })}

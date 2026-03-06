@@ -104,6 +104,52 @@ type StoredPluginCatalog = {
   lastUpdatedAt: string | null;
 };
 
+type FxChainDebugSummary = {
+  path: string | null;
+  pluginEntries: string[];
+  pluginCount: number;
+  bypassFlags: number[];
+};
+
+type WavAnalysisSummary = {
+  filePath: string;
+  fileSize: number;
+  audioFormat: "pcm" | "float";
+  channelCount: number;
+  sampleRate: number;
+  bitsPerSample: number;
+  frameCount: number;
+  durationSeconds: number;
+  peak: number;
+  rms: number;
+  fingerprint: string;
+  comparisonReady: boolean;
+};
+
+type WavAnalysisResult = {
+  summary: WavAnalysisSummary;
+  samples: Float32Array | null;
+};
+
+type AudioComparisonSummary = {
+  comparedFrames: number;
+  identical: boolean;
+  maxAbsDelta: number;
+  rmsDelta: number;
+  note: string;
+};
+
+type JobDebugReport = {
+  createdAt: string;
+  stage: "done" | "error";
+  profileName: string;
+  fxChain: FxChainDebugSummary;
+  inputAudio: WavAnalysisSummary | null;
+  outputAudio: WavAnalysisSummary | null;
+  comparison: AudioComparisonSummary | null;
+  notes: string[];
+};
+
 const EMPTY_ENGINE_STATE: EngineState = {
   running: false,
   cancelling: false,
@@ -447,6 +493,292 @@ function escapeLuaString(value: string) {
   return JSON.stringify(value);
 }
 
+function normalizeIndentedLines(lines: string[]) {
+  const meaningfulLines = lines.filter((line) => line.trim().length > 0);
+
+  if (meaningfulLines.length === 0) {
+    return "";
+  }
+
+  const sharedIndentation = meaningfulLines.reduce((minimum, line) => {
+    const match = line.match(/^(\s*)/);
+    const indentLength = match ? match[1].length : 0;
+    return Math.min(minimum, indentLength);
+  }, Number.POSITIVE_INFINITY);
+
+  return lines.map((line) => line.slice(sharedIndentation)).join("\n").trimEnd();
+}
+
+function normalizeFxChainText(text: string) {
+  const trimmedText = text.trim();
+
+  if (!trimmedText) {
+    return "";
+  }
+
+  if (!/^\s*<FXCHAIN(?:\s|$)/.test(trimmedText)) {
+    return text.trimEnd();
+  }
+
+  const lines = text.split(/\r?\n/);
+  const bodyLines: string[] = [];
+  let collecting = false;
+  let depth = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+
+    if (!collecting) {
+      if (/^<FXCHAIN(?:\s|$)/.test(trimmed)) {
+        collecting = true;
+        depth = 1;
+      }
+      continue;
+    }
+
+    if (trimmed === ">") {
+      depth -= 1;
+
+      if (depth === 0) {
+        break;
+      }
+
+      bodyLines.push(line);
+      continue;
+    }
+
+    bodyLines.push(line);
+
+    if (trimmed.startsWith("<")) {
+      depth += 1;
+    }
+  }
+
+  return normalizeIndentedLines(bodyLines);
+}
+
+const MAX_COMPARISON_SAMPLES = 8_000_000;
+
+function inspectFxChainFile(filePath: string | null): FxChainDebugSummary {
+  if (!filePath || !existsSync(filePath)) {
+    return {
+      path: filePath,
+      pluginEntries: [],
+      pluginCount: 0,
+      bypassFlags: [],
+    };
+  }
+
+  const pluginEntries: string[] = [];
+  const bypassFlags: number[] = [];
+  const lines = readFileSync(filePath, "utf8").split(/\r?\n/);
+
+  for (const line of lines) {
+    const pluginMatch = line.match(/^\s*<([A-Z0-9_]+)\s+"([^"]+)"/);
+
+    if (pluginMatch) {
+      pluginEntries.push(pluginMatch[2]);
+      continue;
+    }
+
+    const bypassMatch = line.match(/^\s*BYPASS\s+([01])/);
+
+    if (bypassMatch) {
+      bypassFlags.push(Number.parseInt(bypassMatch[1], 10));
+    }
+  }
+
+  return {
+    path: filePath,
+    pluginEntries,
+    pluginCount: pluginEntries.length,
+    bypassFlags,
+  };
+}
+
+function analyzeWavFile(filePath: string): WavAnalysisResult {
+  const fileBuffer = readFileSync(filePath);
+
+  if (fileBuffer.length < 44 || fileBuffer.toString("ascii", 0, 4) !== "RIFF" || fileBuffer.toString("ascii", 8, 12) !== "WAVE") {
+    throw new Error("Unsupported WAV file header.");
+  }
+
+  let cursor = 12;
+  let audioFormatCode = 0;
+  let channelCount = 0;
+  let sampleRate = 0;
+  let bitsPerSample = 0;
+  let blockAlign = 0;
+  let dataOffset = -1;
+  let dataSize = 0;
+
+  while (cursor + 8 <= fileBuffer.length) {
+    const chunkId = fileBuffer.toString("ascii", cursor, cursor + 4);
+    const chunkSize = fileBuffer.readUInt32LE(cursor + 4);
+    const chunkDataOffset = cursor + 8;
+
+    if (chunkId === "fmt " && chunkSize >= 16) {
+      audioFormatCode = fileBuffer.readUInt16LE(chunkDataOffset);
+      channelCount = fileBuffer.readUInt16LE(chunkDataOffset + 2);
+      sampleRate = fileBuffer.readUInt32LE(chunkDataOffset + 4);
+      blockAlign = fileBuffer.readUInt16LE(chunkDataOffset + 12);
+      bitsPerSample = fileBuffer.readUInt16LE(chunkDataOffset + 14);
+    } else if (chunkId === "data") {
+      dataOffset = chunkDataOffset;
+      dataSize = chunkSize;
+      break;
+    }
+
+    cursor = chunkDataOffset + chunkSize + (chunkSize % 2);
+  }
+
+  if (dataOffset < 0 || !channelCount || !sampleRate || !bitsPerSample || !blockAlign) {
+    throw new Error("Could not parse WAV format/data chunks.");
+  }
+
+  const audioFormat = audioFormatCode === 3 ? "float" : audioFormatCode === 1 ? "pcm" : null;
+
+  if (!audioFormat) {
+    throw new Error(`Unsupported WAV format code: ${audioFormatCode}`);
+  }
+
+  const bytesPerSample = bitsPerSample / 8;
+  const frameCount = Math.floor(dataSize / blockAlign);
+  const totalSamples = frameCount * channelCount;
+  const fingerprint = createHash("sha1");
+  const fingerprintBuffer = Buffer.allocUnsafe(4);
+  const samples = totalSamples <= MAX_COMPARISON_SAMPLES ? new Float32Array(totalSamples) : null;
+
+  let peak = 0;
+  let sumSquares = 0;
+
+  const readSample = (sampleOffset: number) => {
+    if (audioFormat === "float") {
+      if (bitsPerSample === 32) {
+        return fileBuffer.readFloatLE(sampleOffset);
+      }
+
+      if (bitsPerSample === 64) {
+        return fileBuffer.readDoubleLE(sampleOffset);
+      }
+    } else {
+      if (bitsPerSample === 8) {
+        return (fileBuffer.readUInt8(sampleOffset) - 128) / 128;
+      }
+
+      if (bitsPerSample === 16) {
+        return fileBuffer.readInt16LE(sampleOffset) / 32768;
+      }
+
+      if (bitsPerSample === 24) {
+        return fileBuffer.readIntLE(sampleOffset, 3) / 8388608;
+      }
+
+      if (bitsPerSample === 32) {
+        return fileBuffer.readInt32LE(sampleOffset) / 2147483648;
+      }
+    }
+
+    throw new Error(`Unsupported WAV bit depth: ${bitsPerSample}`);
+  };
+
+  for (let sampleIndex = 0; sampleIndex < totalSamples; sampleIndex += 1) {
+    const byteOffset = dataOffset + sampleIndex * bytesPerSample;
+    const rawValue = readSample(byteOffset);
+    const sample = Number.isFinite(rawValue) ? Math.max(-1, Math.min(1, rawValue)) : 0;
+    const absolute = Math.abs(sample);
+
+    if (samples) {
+      samples[sampleIndex] = sample;
+    }
+
+    if (absolute > peak) {
+      peak = absolute;
+    }
+
+    sumSquares += sample * sample;
+
+    const quantized = Math.round(sample * 2147483647);
+    fingerprintBuffer.writeInt32LE(quantized, 0);
+    fingerprint.update(fingerprintBuffer);
+  }
+
+  return {
+    summary: {
+      filePath,
+      fileSize: statSync(filePath).size,
+      audioFormat,
+      channelCount,
+      sampleRate,
+      bitsPerSample,
+      frameCount,
+      durationSeconds: sampleRate > 0 ? frameCount / sampleRate : 0,
+      peak,
+      rms: totalSamples > 0 ? Math.sqrt(sumSquares / totalSamples) : 0,
+      fingerprint: fingerprint.digest("hex"),
+      comparisonReady: samples !== null,
+    },
+    samples,
+  };
+}
+
+function compareWavAnalyses(input: WavAnalysisResult, output: WavAnalysisResult): AudioComparisonSummary {
+  if (
+    !input.samples ||
+    !output.samples ||
+    input.summary.channelCount !== output.summary.channelCount ||
+    input.summary.sampleRate !== output.summary.sampleRate
+  ) {
+    return {
+      comparedFrames: 0,
+      identical: false,
+      maxAbsDelta: 0,
+      rmsDelta: 0,
+      note: "Direct sample comparison skipped because the files are too large or their format differs.",
+    };
+  }
+
+  const comparedSamples = Math.min(input.samples.length, output.samples.length);
+
+  if (comparedSamples === 0) {
+    return {
+      comparedFrames: 0,
+      identical: false,
+      maxAbsDelta: 0,
+      rmsDelta: 0,
+      note: "No audio samples available for comparison.",
+    };
+  }
+
+  let maxAbsDelta = 0;
+  let sumSquares = 0;
+
+  for (let sampleIndex = 0; sampleIndex < comparedSamples; sampleIndex += 1) {
+    const delta = input.samples[sampleIndex] - output.samples[sampleIndex];
+    const absolute = Math.abs(delta);
+
+    if (absolute > maxAbsDelta) {
+      maxAbsDelta = absolute;
+    }
+
+    sumSquares += delta * delta;
+  }
+
+  const frameCount = Math.floor(comparedSamples / input.summary.channelCount);
+  const identicalLength = input.samples.length === output.samples.length;
+  const identical = identicalLength && maxAbsDelta <= 1e-9;
+
+  return {
+    comparedFrames: frameCount,
+    identical,
+    maxAbsDelta,
+    rmsDelta: Math.sqrt(sumSquares / comparedSamples),
+    note: identicalLength
+      ? "Compared the full waveform sample-by-sample."
+      : "Compared the shared portion of the waveform because the rendered file length changed.",
+  };
+}
+
 function runAppleScript(lines: string[]) {
   const result = spawnSync(
     "osascript",
@@ -497,6 +829,7 @@ export class BatchMasterService {
       completedAt: job.completedAt ?? null,
       splashLogPath: job.splashLogPath ?? null,
       stderrLogPath: job.stderrLogPath ?? null,
+      debugReportPath: job.debugReportPath ?? null,
       status: job.status === "processing" ? "queued" : job.status,
     }));
     this.logs = this.readLogTail(ENGINE_LOG_PATH, 300);
@@ -652,13 +985,13 @@ export class BatchMasterService {
       throw new Error("Plugin editor session project does not exist yet. Open the editor first.");
     }
 
-    const fxChainBlock = this.extractFirstFxChainBlock(session.projectPath);
+    const fxChainContents = this.extractFirstFxChainContents(session.projectPath);
 
-    if (!fxChainBlock) {
+    if (!fxChainContents) {
       throw new Error("No FX chain was found in the editor session. Save the project in REAPER and try again.");
     }
 
-    writeFileSync(session.fxChainPath, `${fxChainBlock}\n`, "utf8");
+    writeFileSync(session.fxChainPath, `${fxChainContents}\n`, "utf8");
 
     const updatedSession = this.upsertEditorSession({
       ...session,
@@ -862,6 +1195,7 @@ export class BatchMasterService {
       completedAt: null,
       splashLogPath: null,
       stderrLogPath: null,
+      debugReportPath: null,
     };
 
     this.jobs = [...this.jobs, job];
@@ -1420,6 +1754,18 @@ local function trim_start(text)
   return text:gsub("^%s+", "")
 end
 
+local function wrap_fxchain(chain_text)
+  if chain_text == "" then
+    return ""
+  end
+
+  if trim_start(chain_text):match("^<FXCHAIN[%s>]") then
+    return chain_text
+  end
+
+  return "<FXCHAIN\\n" .. chain_text .. "\\n>"
+end
+
 local function replace_block(chunk, block_name, replacement)
   local output = {}
   local collecting = false
@@ -1486,7 +1832,7 @@ if track and reaper.TrackFX_GetCount(track) == 0 then
 end
 
 if track and initialize_project then
-  local chain_text = read_text(chain_path)
+  local chain_text = wrap_fxchain(read_text(chain_path))
   if chain_text ~= "" then
     local ok, chunk = reaper.GetTrackStateChunk(track, "", false)
     if ok then
@@ -1543,7 +1889,7 @@ reaper.PreventUIRefresh(-1)
     return "";
   }
 
-  private extractFirstFxChainBlock(projectPath: string) {
+  private extractFirstFxChainContents(projectPath: string) {
     const lines = readFileSync(projectPath, "utf8").split(/\r?\n/);
     const capturedLines: string[] = [];
     let collecting = false;
@@ -1573,28 +1919,12 @@ reaper.PreventUIRefresh(-1)
         depth -= 1;
 
         if (depth === 0) {
-          return this.normalizeIndentedBlock(capturedLines);
+          return normalizeFxChainText(capturedLines.join("\n"));
         }
       }
     }
 
     return "";
-  }
-
-  private normalizeIndentedBlock(lines: string[]) {
-    const meaningfulLines = lines.filter((line) => line.trim().length > 0);
-
-    if (meaningfulLines.length === 0) {
-      return "";
-    }
-
-    const sharedIndentation = meaningfulLines.reduce((minimum, line) => {
-      const match = line.match(/^(\s*)/);
-      const indentLength = match ? match[1].length : 0;
-      return Math.min(minimum, indentLength);
-    }, Number.POSITIVE_INFINITY);
-
-    return lines.map((line) => line.slice(sharedIndentation)).join("\n").trimEnd();
   }
 
   private async runLoop() {
@@ -1624,6 +1954,7 @@ reaper.PreventUIRefresh(-1)
   private async runJob(jobId: string, profile: RenderProfile) {
     const job = this.mustGetJob(jobId);
     const runRoot = path.join(RUNS_DIR, job.id);
+    const debugReportPath = path.join(runRoot, "debug-report.json");
 
     ensureDir(runRoot);
 
@@ -1645,7 +1976,8 @@ reaper.PreventUIRefresh(-1)
 
     ensureDir(path.dirname(job.outputPath));
 
-    const batchFile = this.buildBatchConvertFile(job.inputPath, job.outputPath, profile.fxChainPath);
+    const batchFxChainPath = profile.fxChainPath ? this.prepareFxChainForBatchConvert(profile.fxChainPath, runRoot) : null;
+    const batchFile = this.buildBatchConvertFile(job.inputPath, job.outputPath, batchFxChainPath);
     writeFileSync(batchFilePath, batchFile, "utf8");
 
     this.updateJob(job.id, {
@@ -1721,17 +2053,20 @@ reaper.PreventUIRefresh(-1)
         currentStep: "Cancelled",
         errorMessage: "Batch cancelled by user.",
         completedAt: nowIso(),
+        debugReportPath,
       });
       return;
     }
 
     if (exitResult.error) {
+      this.writeJobDebugReport(this.mustGetJob(job.id), profile, debugReportPath, "error");
       this.updateJob(job.id, {
         status: "error",
         progress: 0,
         currentStep: "Launch failed",
         errorMessage: exitResult.error.message,
         completedAt: nowIso(),
+        debugReportPath,
       });
       this.log(`Job ${job.id} failed to launch: ${exitResult.error.message}`);
       return;
@@ -1739,25 +2074,96 @@ reaper.PreventUIRefresh(-1)
 
     if ((exitResult.code ?? 0) !== 0 || !existsSync(job.outputPath)) {
       const exitText = `code=${exitResult.code ?? "null"} signal=${exitResult.signal ?? "null"}`;
+      this.writeJobDebugReport(this.mustGetJob(job.id), profile, debugReportPath, "error");
       this.updateJob(job.id, {
         status: "error",
         progress: 0,
         currentStep: "Render failed",
         errorMessage: `REAPER did not produce output (${exitText}).`,
         completedAt: nowIso(),
+        debugReportPath,
       });
       this.log(`Job ${job.id} failed: ${exitText}`);
       return;
     }
 
+    this.writeJobDebugReport(this.mustGetJob(job.id), profile, debugReportPath, "done");
     this.updateJob(job.id, {
       status: "done",
       progress: 1,
       currentStep: "Completed",
       errorMessage: "",
       completedAt: nowIso(),
+      debugReportPath,
     });
     this.log(`Job ${job.id} completed.`);
+  }
+
+  private writeJobDebugReport(job: BatchJob, profile: RenderProfile, reportPath: string, stage: "done" | "error") {
+    const notes: string[] = [];
+    const fxChain = inspectFxChainFile(profile.fxChainPath);
+    let inputAudio: WavAnalysisSummary | null = null;
+    let outputAudio: WavAnalysisSummary | null = null;
+    let inputAnalysis: WavAnalysisResult | null = null;
+    let outputAnalysis: WavAnalysisResult | null = null;
+    let comparison: AudioComparisonSummary | null = null;
+
+    if (fxChain.pluginCount === 0) {
+      notes.push("No plug-ins were detected in the selected .RfxChain file.");
+    }
+
+    try {
+      inputAnalysis = analyzeWavFile(job.inputPath);
+      inputAudio = inputAnalysis.summary;
+    } catch (error) {
+      notes.push(`Could not analyze input WAV: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
+
+    if (existsSync(job.outputPath)) {
+      try {
+        outputAnalysis = analyzeWavFile(job.outputPath);
+        outputAudio = outputAnalysis.summary;
+      } catch (error) {
+        notes.push(`Could not analyze output WAV: ${error instanceof Error ? error.message : "unknown error"}`);
+      }
+    } else {
+      notes.push("Output WAV was not found when the debug report was generated.");
+    }
+
+    if (inputAnalysis && outputAnalysis) {
+      comparison = compareWavAnalyses(inputAnalysis, outputAnalysis);
+
+      if (comparison.identical) {
+        notes.push("Input and output waveforms are sample-identical.");
+      }
+    }
+
+    const report: JobDebugReport = {
+      createdAt: nowIso(),
+      stage,
+      profileName: profile.name,
+      fxChain,
+      inputAudio,
+      outputAudio,
+      comparison,
+      notes,
+    };
+
+    writeJsonFile(reportPath, report);
+
+    this.log(
+      `Job ${job.id} debug: FX chain plugins=${fxChain.pluginEntries.length > 0 ? fxChain.pluginEntries.join(" | ") : "(none)"}`,
+    );
+
+    if (comparison) {
+      this.log(
+        `Job ${job.id} debug: waveform identical=${comparison.identical} maxDelta=${comparison.maxAbsDelta.toFixed(6)} rmsDelta=${comparison.rmsDelta.toFixed(6)}`,
+      );
+    }
+
+    if (notes.length > 0) {
+      this.log(`Job ${job.id} debug notes: ${notes.join(" / ")}`);
+    }
   }
 
   private buildBatchConvertFile(inputPath: string, outputPath: string, fxChainPath: string | null) {
@@ -1768,15 +2174,7 @@ reaper.PreventUIRefresh(-1)
         throw new Error(`FX chain file does not exist: ${fxChainPath}`);
       }
 
-      const fxChainContents = readFileSync(fxChainPath, "utf8").trimEnd();
-
-      if (!fxChainContents) {
-        throw new Error(`FX chain file is empty: ${fxChainPath}`);
-      }
-
-      for (const line of fxChainContents.split(/\r?\n/)) {
-        lines.push(`  ${line}`);
-      }
+      lines.push(`  FXCHAIN '${fxChainPath}'`);
     }
 
     lines.push("  USESRCSTART 1");
@@ -1784,6 +2182,28 @@ reaper.PreventUIRefresh(-1)
     lines.push(">");
 
     return `${lines.join("\n")}\n`;
+  }
+
+  private prepareFxChainForBatchConvert(fxChainPath: string, runRoot: string) {
+    if (!existsSync(fxChainPath)) {
+      throw new Error(`FX chain file does not exist: ${fxChainPath}`);
+    }
+
+    const fxChainContents = readFileSync(fxChainPath, "utf8").trimEnd();
+
+    if (!fxChainContents) {
+      throw new Error(`FX chain file is empty: ${fxChainPath}`);
+    }
+
+    const normalizedFxChainContents = normalizeFxChainText(fxChainContents);
+
+    if (!normalizedFxChainContents) {
+      throw new Error(`FX chain file did not contain a usable FX chain: ${fxChainPath}`);
+    }
+
+    const normalizedFxChainPath = path.join(runRoot, "batchconvert-fxchain.RfxChain");
+    writeFileSync(normalizedFxChainPath, `${normalizedFxChainContents}\n`, "utf8");
+    return normalizedFxChainPath;
   }
 
   private async readNewSplashLogLines(filePath: string, cursor: number, onChunk: (text: string) => void) {

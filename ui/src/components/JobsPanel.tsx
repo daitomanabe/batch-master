@@ -36,6 +36,7 @@ export function JobsPanel({ jobs, onRetry, onRemove, onClearFinished, compact = 
                 <p>{job.currentStep}</p>
                 {job.startedAt ? <p>Started: {new Date(job.startedAt).toLocaleString("ja-JP")}</p> : null}
                 {job.completedAt ? <p>Finished: {new Date(job.completedAt).toLocaleString("ja-JP")}</p> : null}
+                {job.debugReportPath ? <code>{job.debugReportPath}</code> : null}
                 {job.splashLogPath ? <code>{job.splashLogPath}</code> : null}
                 {job.stderrLogPath ? <code>{job.stderrLogPath}</code> : null}
                 {job.errorMessage ? <p className="error-text">{job.errorMessage}</p> : null}
