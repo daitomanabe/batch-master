@@ -1,1 +1,0 @@
-{"root":["./src/app.tsx","./src/main.tsx","./src/components/batchqueue.tsx","./src/components/chaineditor.tsx","./src/components/pluginlibrary.tsx","./src/components/presetselector.tsx","./src/components/savedchains.tsx","./src/hooks/usebatchprogress.ts","./src/hooks/usejucebridge.ts","./src/lib/mockbackend.ts","./src/types/index.ts","./src/types/juce.d.ts"],"version":"5.9.3"}
